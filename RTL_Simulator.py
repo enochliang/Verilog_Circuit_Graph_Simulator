@@ -377,84 +377,7 @@ class RTL_Simulator(AST_NodeClassify):
             self.circuit_graph_node[node_id].set_fault_list(n_fault_list)
         else:
             n_fault_list = {}
-            if name in self.prob_always_prop:
-                prob = 1.0
-                src_node_ids = [edge[2] for edge in edges]
-                for src_id in src_node_ids:
-                    src_fault_list = self.circuit_graph_node[src_id].fault_list
-                    for key in src_fault_list:
-                        if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                            continue
-                        n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-
-            elif name == "and":
-                num_of_1 = self.circuit_graph_node[node_id].value.count("1")
-                prob = float(num_of_1) / float(width)
-                src_node_ids = [edge[2] for edge in edges]
-                for src_id in src_node_ids:
-                    src_fault_list = self.circuit_graph_node[src_id].fault_list
-                    for key in src_fault_list:
-                        if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                            continue
-                        n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-            elif name == "or":
-                num_of_0 = self.circuit_graph_node[node_id].value.count("0")
-                prob = float(num_of_0) / float(width)
-                src_node_ids = [edge[2] for edge in edges]
-                for src_id in src_node_ids:
-                    src_fault_list = self.circuit_graph_node[src_id].fault_list
-                    for key in src_fault_list:
-                        if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                            continue
-                        n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-
-            elif name == "logand":
-                if self.circuit_graph_node[node_id].value == "1":
-                    src_node_ids = [edge[2] for edge in edges]
-                    for src_id in src_node_ids:
-                        if self.circuit_graph_node[src_id].value.count("1") == 1:
-                            prob = 1.0 / float(self.circuit_graph_node[src_id].width)
-                        else:
-                            prob = 0.0
-                        src_fault_list = self.circuit_graph_node[src_id].fault_list
-                        for key in src_fault_list:
-                            if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                                continue
-                            n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-                else:
-                    prob = 1.0
-                    src_node_ids = [edge[2] for edge in edges]
-                    for src_id in src_node_ids:
-                        src_fault_list = self.circuit_graph_node[src_id].fault_list
-                        for key in src_fault_list:
-                            if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                                continue
-                            n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-            elif name == "logor":
-                if self.circuit_graph_node[node_id].value == "0":
-                    prob = 1.0
-                    src_node_ids = [edge[2] for edge in edges]
-                    for src_id in src_node_ids:
-                        if self.circuit_graph_node[src_id].value.count("1") == 1:
-                            prob = 1.0 / float(self.circuit_graph_node[src_id].width)
-                        else:
-                            prob = 0.0
-                        src_fault_list = self.circuit_graph_node[src_id].fault_list
-                        for key in src_fault_list:
-                            if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                                continue
-                            n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-                else:
-                    prob = 1.0
-                    src_node_ids = [edge[2] for edge in edges]
-                    for src_id in src_node_ids:
-                        src_fault_list = self.circuit_graph_node[src_id].fault_list
-                        for key in src_fault_list:
-                            if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
-                                continue
-                            n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
-
-            elif name in {"gt","lt","gte","lte"}:
+            if name in {"gt","lt","gte","lte"}:
                 src_node_ids = [edge[2] for edge in edges]
                 if "const" in [self.circuit_graph_node[node_id].name for node_id in src_node_ids]: # 1 Variable Compare
                     const_node_id = [node_id for node_id in src_node_ids if self.circuit_graph_node[node_id].name == "const"][0]
@@ -495,15 +418,65 @@ class RTL_Simulator(AST_NodeClassify):
                         n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
                 else:
                     raise SimulationError("Error: Comparator has not only 1 variable input.")
-            elif name == "sel":
-                src_id = edges[0][2]
-                width_a = self.circuit_graph_node[src_id].width
-                prob = 1.0
-                src_fault_list = self.circuit_graph_node[src_id].fault_list
-                for key in src_fault_list:
-                    n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
             else:
-                raise SimulationError(f"Probability Calculation Error: Unrecognized OP Node! Node Name = {name}",1)
+                if name in self.prob_always_prop:
+                    prob = 1.0
+                    src_node_ids_probs = [(edge[2],prob) for edge in edges]
+
+                elif name == "and":
+                    num_of_1 = self.circuit_graph_node[node_id].value.count("1")
+                    prob = float(num_of_1) / float(width)
+                    src_node_ids_probs = [(edge[2],prob) for edge in edges]
+
+                elif name == "or":
+                    num_of_0 = self.circuit_graph_node[node_id].value.count("0")
+                    prob = float(num_of_0) / float(width)
+                    src_node_ids_probs = [(edge[2],prob) for edge in edges]
+
+                elif name == "logand":
+                    if self.circuit_graph_node[node_id].value == "1":
+                        src_node_ids_probs = []
+                        src_node_ids = [edge[2] for edge in edges]
+                        for src_id in src_node_ids:
+                            if self.circuit_graph_node[src_id].value.count("1") == 1:
+                                prob = 1.0 / float(self.circuit_graph_node[src_id].width)
+                            else:
+                                prob = 0.0
+                            src_fault_list = self.circuit_graph_node[src_id].fault_list
+                            for key in src_fault_list:
+                                if (key in n_fault_list) and src_fault_list[key]["prob"] * prob < n_fault_list[key]["prob"]:
+                                    continue
+                                n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * prob, "type": src_fault_list[key]["type"]}
+                    else:
+                        prob = 1.0
+                        src_node_ids_probs = [(edge[2], prob) for edge in edges]
+                elif name == "logor":
+                    if self.circuit_graph_node[node_id].value == "0":
+                        src_node_ids_probs = []
+                        src_node_ids = [edge[2] for edge in edges]
+                        for src_id in src_node_ids:
+                            if self.circuit_graph_node[src_id].value.count("1") == 1:
+                                prob = 1.0 / float(self.circuit_graph_node[src_id].width)
+                            else:
+                                prob = 0.0
+                            src_node_ids_probs.append((src_id,prob))
+                    else:
+                        prob = 1.0
+                        src_node_ids_probs = [(edge[2], prob) for edge in edges]
+
+                elif name == "sel":
+                    src_id = edges[0][2]
+                    prob = 1.0
+                    src_node_ids_probs = [(src_id,prob)]
+                else:
+                    raise SimulationError(f"Probability Calculation Error: Unrecognized OP Node! Node Name = {name}",1)
+
+                for src_id,src_prob in src_node_ids_probs:
+                    src_fault_list = self.circuit_graph_node[src_id].fault_list
+                    for key in src_fault_list:
+                        if (key in n_fault_list) and src_fault_list[key]["prob"] * src_prob < n_fault_list[key]["prob"]:
+                            continue
+                        n_fault_list[key] = {"prob":src_fault_list[key]["prob"] * src_prob, "type": src_fault_list[key]["type"]}
             self.circuit_graph_node[node_id].set_fault_list(n_fault_list)
 
 
