@@ -424,14 +424,24 @@ class RTL_Simulator(AST_NodeClassify):
                     src_node_ids_probs = [(edge[2],prob) for edge in edges]
 
                 elif name == "and":
-                    num_of_1 = self.circuit_graph_node[node_id].value.count("1")
-                    prob = float(num_of_1) / float(width)
-                    src_node_ids_probs = [(edge[2],prob) for edge in edges]
+                    src_node_ids = [edge[2] for edge in edges]
+                    node_id_1 = src_node_ids[0]
+                    node_id_2 = src_node_ids[1]
+                    num_of_1_node_1 = self.circuit_graph_node[node_id_1].value.count("1")
+                    num_of_1_node_2 = self.circuit_graph_node[node_id_2].value.count("1")
+                    prob_1 = float(num_of_1_node_2) / float(width)
+                    prob_2 = float(num_of_1_node_1) / float(width)
+                    src_node_ids_probs = [(node_id_1,prob_1),(node_id_2,prob_2)]
 
                 elif name == "or":
-                    num_of_0 = self.circuit_graph_node[node_id].value.count("0")
-                    prob = float(num_of_0) / float(width)
-                    src_node_ids_probs = [(edge[2],prob) for edge in edges]
+                    src_node_ids = [edge[2] for edge in edges]
+                    node_id_1 = src_node_ids[0]
+                    node_id_2 = src_node_ids[1]
+                    num_of_0_node_1 = self.circuit_graph_node[node_id_1].value.count("0")
+                    num_of_0_node_2 = self.circuit_graph_node[node_id_2].value.count("0")
+                    prob_1 = float(num_of_0_node_2) / float(width)
+                    prob_2 = float(num_of_0_node_1) / float(width)
+                    src_node_ids_probs = [(node_id_1,prob_1),(node_id_2,prob_2)]
 
                 elif name == "logand":
                     if self.circuit_graph_node[node_id].value == "1":
