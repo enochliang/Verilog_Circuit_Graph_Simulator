@@ -60,6 +60,7 @@ class AST_Checker(AST_Analyzer):
         if not self.ast.find(".//arraysel") == None:
             print("  Warning: Found <arraysel>.")
             array_name = self.ast.find(".//arraysel").getchildren()[0].attrib["name"]
+            self._get_loc_info(self.ast.find())
             raise Unwanted_Coding_Style(f"  Array Name = {array_name}",0)
         else:
             print("Pass: No Array in Design.")
