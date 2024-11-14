@@ -1,5 +1,6 @@
 from lxml import etree
 import pprint 
+import argparse
 
 class RTL_Coding_Style_Warning(Exception):
     def __init__(self, message, error_code):
@@ -31,6 +32,17 @@ class AST_Analyzer:
             for sig in signals:
                 print("  "+sig)
         return signals
+
+    def _show_all_submodname(self):
+        submodname_dict = {}
+        for module in self.ast.findall(".//module"):
+            orig_name = module.attrib["origName"]
+            inst_name = module.attrib["name"]
+            if orig_name in submodname_dict:
+                submodname_dict[orig_name].append(inst_name)
+            else:
+                submodname_dict[orig_name] = [inst_name]
+        pprint.pp(submodname_dict)
 
     def get_dtypetable_as_dict(self,output=True) -> dict:
         dtypes_dict = dict()
@@ -200,7 +212,16 @@ def Verilator_AST_Tree(ast_file_path:str) -> etree._ElementTree:
 
 
 if __name__ == "__main__":
-    ast_file = "./ast/Vpicorv32_axi.xml"
+    # Step 1: Create the parser
+    parser = argparse.ArgumentParser(description="A simple example of argparse usage.")
+
+    # Step 2: Define arguments
+    parser.add_argument("ast", type=str, help="AST path")                  # Positional argument
+
+    # Step 3: Parse the arguments
+    args = parser.parse_args()
+
+    ast_file = args.ast
     ast = Verilator_AST_Tree(ast_file)
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     print("# Start parsing ["+ast_file+"] #")
