@@ -9,4 +9,4 @@ pip3 install lxml
 ```
 
 ## Run Checker
-`python3 AST_Checker.py`
+`python3 AST_Checker.py "ast_path"`
