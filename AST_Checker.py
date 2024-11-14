@@ -1,6 +1,14 @@
 from AST_Analyzer import *
 import argparse
 
+class Unwanted_Coding_Style(Exception):
+    def __init__(self, message, error_code):
+        super().__init__(message)
+        self.error_code = error_code
+
+    def __str__(self):
+        return f"{self.args[0]} (Error Code: {self.error_code})"
+
 class AST_Checker(AST_Analyzer):
 
     def __init__(self, ast: etree._ElementTree):
@@ -47,6 +55,17 @@ class AST_Checker(AST_Analyzer):
             print("ALL <"+x+"> are under <"+y+">")
 
 
+    def _check_no_array(self):
+        print("Start Checking No Array in The Design...")
+        if not self.ast.find(".//arraysel") == None:
+            print("  Warning: Found <arraysel>.")
+            array_name = self.ast.find(".//arraysel").getchildren()[0].attrib["name"]
+            raise Unwanted_Coding_Style(f"  Array Name = {array_name}",0)
+        else:
+            print("Pass: No Array in Design.")
+        print("-"*80)
+
+
     def _check_sel_no_muxdec(self):
         print("Start Checking No MUX or DEC in <sel>...")
         flag = False
@@ -84,15 +103,6 @@ class AST_Checker(AST_Analyzer):
         print("-"*80)
 
 
-    def _check_no_array(self):
-        print("Start Checking No Array in The Design...")
-        if not self.ast.find(".//arraysel") == None:
-            print("  Warning: Found <arraysel>.")
-            array_name = self.ast.find(".//arraysel").getchildren()[0].attrib["name"]
-            print(f"  Array Name = {array_name}")
-        else:
-            print("Pass: No Array in Design.")
-        print("-"*80)
 
 
     def _check_lv_only_left(self):
