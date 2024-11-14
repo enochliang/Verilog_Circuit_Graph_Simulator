@@ -125,9 +125,7 @@ class AST_Analyzer:
         target_nodes = self.ast.findall(".//"+target)
         if target_nodes:
             for t_node in target_nodes:
-                children = []
-                for node in t_node.getchildren():
-                    children.append(node.tag)
+                children = [node.tag for node in t_node.getchildren()]
                 if not children in childrens:
                     childrens.append(children)
             if output:
@@ -202,13 +200,16 @@ def Verilator_AST_Tree(ast_file_path:str) -> etree._ElementTree:
 
 
 if __name__ == "__main__":
-    ast_file = "./ast/Vsha1.xml"
+    ast_file = "./ast/Vpicorv32_axi.xml"
     ast = Verilator_AST_Tree(ast_file)
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    analyzer.check_simple_design()
-    analyzer.get_info()
+    #analyzer.get_info()
+    #analyzer.check_simple_design()
+    analyzer.get_ordered_children_under("caseitem")
+    for a in ast.findall(".//caseitem/and"):
+        print(a.attrib)
 
 

@@ -1,19 +1,26 @@
 from AST_Analyzer import *
+import argparse
 
 class AST_Checker(AST_Analyzer):
+
     def __init__(self, ast: etree._ElementTree):
         AST_Analyzer.__init__(self,ast)
 
-    def get_info(self):
+
+    def _get_info(self):
         pprint.pp(self.__dir__())
 
+
     def _get_loc_info(self,node):
+        # Input:  lxml node
+        # Output: the location of statement in the RTL code
         if "loc" in node.attrib:
             loc = node.attrib["loc"]
             _file = loc.split(",")[0]
             _file = self.ast.find(f".//file[@id='{_file}']").attrib["filename"]
             n_line = loc.split(",")[1]
             print(f"    File = {_file}, at line {n_line}.")
+
 
     def check_dtype(self,output=True) -> set:
         # Make a List of Packed dtype That Doesn't Start With Zero Bit.
@@ -27,6 +34,7 @@ class AST_Checker(AST_Analyzer):
             for dtype in dtypes:
                 print(dtype)
         return dtypes
+
 
     def check_tag_all_x_are_under_y(self,x:str,y:str):
         target_nodes = self.ast.findall(".//"+x)
@@ -53,7 +61,6 @@ class AST_Checker(AST_Analyzer):
         if not flag:
             print("Pass: No MUX or DEC in <sel>")
         print("-"*80)
-
 
 
     def _check_lv_single_var(self):
@@ -134,13 +141,13 @@ class AST_Checker(AST_Analyzer):
             print("Pass: Each FF <always> only has 1 Left-Value")
         print("-"*80)
 
+
     def _check_comb_always_only_one_lv(self):
         print("Start checking each combinational <always> only has 1 Left-Value...")
         flag = False
         for always in self.ast.findall(".//always"):
             if always.find(".//sentree") != None:
                 continue
-
             lv_set = set()
             for assign in always.findall(".//assign") + always.findall(".//assigndly"):
                 for lv_var in assign.getchildren()[1].findall(".//varref"):
@@ -174,6 +181,7 @@ class AST_Checker(AST_Analyzer):
             print("Pass: Each FF <always> is FULLCASE")
         print("-"*80)
 
+
     def _check_comb_always_no_seq_assign(self):
         print("Start checking no sequential assignments under each combinational <always>...")
         flag = False
@@ -200,6 +208,8 @@ class AST_Checker(AST_Analyzer):
         if not flag:
             print("Pass: Each Comb <always> is FULLCASE")
         print("-"*80)
+
+
     def _check_comb_always_fullcase(self):
         # TODO
         print("Start checking each combinational <always> is FULLCASE...")
@@ -264,24 +274,6 @@ class AST_Checker(AST_Analyzer):
         print("-"*80)
 
 
-    def check_simple_design(self):
-        print("#########################################")
-        print("#    Start Checking Simple Design ...   #")
-        print("#########################################")
-        self._check_no_array()
-        self._check_sel_no_muxdec()
-        self._check_lv_single_var()
-        #self._check_lv_only_left()
-        self._check_comb_always_only_one_lv()
-        self._check_comb_always_no_seq_assign()
-        self._check_comb_always_fullcase()
-        self._check_ff_always_only_one_lv()
-        self._check_ff_always_fullcase()
-        self._check_non_blocking_always_assignment()
-        self._check_no_param_under_assign()
-        self._check_param_not_in_circuit()
-        #self._check_always_only_one_assign()
-
     def _check_always_only_one_assign(self):
         flag = False
         for always in self.ast.findall(".//always"):
@@ -303,6 +295,7 @@ class AST_Checker(AST_Analyzer):
             print("Pass: Only 1 assignment in Each <always>.")
         print("-"*80)
 
+
     def _check_param_not_in_circuit(self):
         print("Start Checking Parameter are all replaced by <const>.")
         flag = False
@@ -315,8 +308,110 @@ class AST_Checker(AST_Analyzer):
             print("Pass: No Parameter in the Circuit.")
         print("-"*80)
 
+    def _show_ff_always_seq_signal(self):
+        for always in [always for always in self.ast.findall(".//always") if not (always.find(".//sentree") is None)]:
+            # Find out all left signals of blocking assignment.
+            blk_lv_var_set = set()
+            for assign in always.findall(".//assign"):
+                for lv_var in [var.attrib["name"] for var in assign.getchildren()[1].iter() if var.tag == "varref"]:
+                    blk_lv_var_set.add(lv_var)
+
+            if blk_lv_var_set == set():
+                continue
+            else:
+                print("Signals assigned by blocking assignment = ")
+                pprint.pp(blk_lv_var_set)
+
+            # Find out dependent signals of those signals we found in the above part
+            dependent_var_set = set()
+            # The target signals on the right of assignment
+            for assign in always.findall(".//assign") + always.findall(".//assigndly"):
+                if set([var.attrib["name"] for var in assign.getchildren()[0].iter() if (var.tag == "varref") and (var.attrib["name"] in blk_lv_var_set)]) != set():
+                    dependent_var_set = dependent_var_set | set([var.attrib["name"] for var in assign.getchildren()[1].iter() if (var.tag == "varref")])
+            # The target signals in the control signal of branches (case & if)
+            for branch_node in always.findall(".//case") + always.findall(".//if"):
+                if set([var for var in branch_node.getchildren()[0].iter() if (var.tag == "varref") and (var.attrib["name"] in blk_lv_var_set)]) != set():
+                    for assign in branch_node.findall(".//assign") + branch_node.findall(".//assigndly"):
+                        dependent_var_set = dependent_var_set | set([var.attrib["name"] for var in assign.getchildren()[1].iter() if (var.tag == "varref")])
+            # The target signals in the control signal of (case(1'b1))
+            for case_node in always.findall(".//case"):
+                if case_node.getchildren()[0].tag != "const":
+                    continue
+                else:
+                    dep_case_flag = False
+                    for caseitem_node in case_node.findall(".//caseitem"):
+                        if len(caseitem_node.getchildren()) > 0 and caseitem_node.getchildren()[0].tag in {"assign","assigndly","if","case"}:
+                            continue
+                        else:
+                            if len(caseitem_node.getchildren()) > 0 and set([var for var in caseitem_node.getchildren()[0].iter() if (var.tag == "varref") and (var.attrib["name"] in blk_lv_var_set)]) != set():
+                                dep_case_flag = True
+                                break
+                    if dep_case_flag:
+                        for assign in case_node.findall(".//assign") + case_node.findall(".//assigndly"):
+                             dependent_var_set = dependent_var_set | set([var.attrib["name"] for var in assign.getchildren()[1].iter() if (var.tag == "varref")])
+
+            # Find out the signals that are not dependent to the signals
+            lv_var_set = set()
+            for assign in always.findall(".//assign") + always.findall(".//assigndly"):
+                for lv_var in [var.attrib["name"] for var in assign.getchildren()[1].iter() if var.tag == "varref"]:
+                    lv_var_set.add(lv_var)
+            
+            print("Dependent Signals = ")
+            pprint.pp(dependent_var_set)
+
+            # Construct a Dependency Dict
+            dep_dict = {}
+            for assign in always.findall(".//assigndly"):
+                cur_lv_var_set = set([var for var in assign.getchildren()[1].iter() if var.tag == "varref"])
+                cur_blk_lv_var_set = set([var for var in assign.getchildren()[1].iter() if var.tag == "varref" and var.attrib["name"] in blk_lv_var_set])
+                for blk_lv_var in cur_blk_lv_var_set:
+                    if blk_lv_var in dep_dict:
+                        for lv_var in cur_blk_lv_var_set:
+                            dep_dict[blk_lv_var].add(lv_var)
+                    else:
+                        dep_dict[blk_lv_var] = cur_blk_lv_var_set
+            #for case_node in always.findall(".//case"):
+
+            print("Dependency Dictionary = ")
+            pprint.pp(dep_dict)
+                    
+            print("Signals Can be Moved Out = ")
+            pprint.pp(lv_var_set - dependent_var_set - blk_lv_var_set)
+
+
+    def check_simple_design(self):
+        print("#########################################")
+        print("#    Start Checking Simple Design ...   #")
+        print("#########################################")
+        self._check_no_array()
+        self._check_sel_no_muxdec()
+        self._check_lv_single_var()
+        #self._check_lv_only_left()
+
+        self._show_ff_always_seq_signal()
+
+        self._check_comb_always_only_one_lv()
+        self._check_comb_always_no_seq_assign()
+        self._check_comb_always_fullcase()
+        self._check_ff_always_only_one_lv()
+        self._check_ff_always_fullcase()
+        self._check_non_blocking_always_assignment()
+        self._check_no_param_under_assign()
+        self._check_param_not_in_circuit()
+        #self._check_always_only_one_assign()
+
+
 if __name__ == "__main__":
-    ast_file = "./ast/Vpicorv32_axi.xml"
+    # Step 1: Create the parser
+    parser = argparse.ArgumentParser(description="A simple example of argparse usage.")
+    
+    # Step 2: Define arguments
+    parser.add_argument("ast", type=str, help="AST path")                  # Positional argument
+    
+    # Step 3: Parse the arguments
+    args = parser.parse_args()
+
+    ast_file = args.ast
     ast = Verilator_AST_Tree(ast_file)
     print("#"*len("# Start parsing ["+ast_file+"] #"))
     print("# Start parsing ["+ast_file+"] #")
