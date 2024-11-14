@@ -38,10 +38,14 @@ class AST_Analyzer:
         for module in self.ast.findall(".//module"):
             orig_name = module.attrib["origName"]
             inst_name = module.attrib["name"]
+            params = {}
+            for param in module.findall(".//var[@param='true']"):
+                params[param.attrib["name"]] = param.find("./const").attrib["name"]
+            inst_info = (inst_name, params)
             if orig_name in submodname_dict:
-                submodname_dict[orig_name].append(inst_name)
+                submodname_dict[orig_name].append(inst_info)
             else:
-                submodname_dict[orig_name] = [inst_name]
+                submodname_dict[orig_name] = [inst_info]
         pprint.pp(submodname_dict)
 
     def get_dtypetable_as_dict(self,output=True) -> dict:
