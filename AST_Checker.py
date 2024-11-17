@@ -54,11 +54,26 @@ class AST_Checker(AST_Analyzer):
         if not flag:
             print("ALL <"+x+"> are under <"+y+">")
 
+    def _check_ff_always_only_1_block_triggered(self):
+        lv_set = set()
+        for always in self.ast.findall(".//always"):
+            if always.find(".//sentree") == None:
+                continue
+            
+    def _check_ff_always_no_blking_assign(self):
+        print("Start Checking No Blocking Assignment in Clock Triggered Always Block...")
+        for always in self.ast.findall(".//always"):
+            if always.find(".//sentree") == None:
+                continue
+            for assign in always.findall(".//assign"):
+                print("  [Checker Report] warning: found a <assign> under clock triggered always block.")
+                self._get_loc_info(assign)
+
 
     def _check_no_array(self):
         print("Start Checking No Array in The Design...")
         if not self.ast.find(".//arraysel") == None:
-            print("  Warning: Found <arraysel>.")
+            print("  [Checker Report] warning: found an <arraysel>.")
             array_name = self.ast.find(".//arraysel").getchildren()[0].attrib["name"]
             self._get_loc_info(self.ast.find(".//arraysel"))
             raise Unwanted_Coding_Style(f"  Array Name = {array_name}",0)
@@ -394,19 +409,20 @@ class AST_Checker(AST_Analyzer):
         print("#########################################")
         print("#    Start Checking Simple Design ...   #")
         print("#########################################")
-        self._check_no_array()
-        self._check_sel_no_muxdec()
-        self._check_lv_single_var()
+        #self._check_no_array()
+        #self._check_sel_no_muxdec()
+        #self._check_lv_single_var()
         #self._check_lv_only_left()
+        self._check_ff_always_no_blking_assign()
 
         self._show_ff_always_seq_signal()
 
-        self._check_comb_always_only_one_lv()
-        self._check_comb_always_no_seq_assign()
-        self._check_comb_always_fullcase()
-        self._check_ff_always_only_one_lv()
-        self._check_ff_always_fullcase()
-        self._check_non_blocking_always_assignment()
+        #self._check_comb_always_only_one_lv()
+        #self._check_comb_always_no_seq_assign()
+        #self._check_comb_always_fullcase()
+        #self._check_ff_always_only_one_lv()
+        #self._check_ff_always_fullcase()
+        #self._check_non_blocking_always_assignment()
         self._check_no_param_under_assign()
         self._check_param_not_in_circuit()
         #self._check_always_only_one_assign()

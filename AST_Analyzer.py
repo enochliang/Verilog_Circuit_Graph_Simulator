@@ -233,8 +233,8 @@ if __name__ == "__main__":
     analyzer = AST_Analyzer(ast)
     #analyzer.get_info()
     #analyzer.check_simple_design()
-    analyzer.get_ordered_children_under("caseitem")
-    for a in ast.findall(".//caseitem/and"):
-        print(a.attrib)
+    analyzer.get_ordered_children_under("always")
+    #for a in ast.findall(".//caseitem/and"):
+    #    print(a.attrib)
 
 
