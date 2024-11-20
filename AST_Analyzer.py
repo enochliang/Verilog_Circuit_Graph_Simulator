@@ -1,8 +1,16 @@
 from lxml import etree
 import pprint 
 import argparse
+import json
 
 class RTL_Coding_Style_Warning(Exception):
+    def __init__(self, message, error_code):
+        super().__init__(message)
+        self.error_code = error_code
+
+    def __str__(self):
+        return f"{self.args[0]} (Error Code: {self.error_code})"
+class Unconsidered_Case(Exception):
     def __init__(self, message, error_code):
         super().__init__(message)
         self.error_code = error_code
@@ -14,6 +22,38 @@ class RTL_Coding_Style_Warning(Exception):
 class AST_Analyzer:
     def __init__(self, ast: etree._ElementTree):
        self.ast = ast
+
+    # Convert a Verilog Format Number to a Decimal Python Number
+    def verilog_num2num(self,num:str):
+        width = None
+        sign = None
+        if "'" in num:
+            split_num = num.split("'")
+            width = split_num[0]
+            if "s" in split_num[1]:
+                radix = split_num[1][0:2]
+                new_num = split_num[1][2:]
+                sign = "1"
+            else:
+                radix = split_num[1][0]
+                new_num = split_num[1][1:]
+                sign = "0"
+            if (radix == "h" or radix == "sh"):
+                new_num = str(int(new_num,16))
+            elif (radix == "d"):
+                new_num = str(int(new_num,10))
+            elif (radix == "o"):
+                new_num = str(int(new_num,8))
+            elif(radix == "b"):
+                new_num = str(int(new_num,2))
+            else:
+                print("Error: Unknown Radix!")
+                print(f"    Num = {num}")
+        else:
+            print("Warning: Not A Verilog Formatted Number.")
+            print(f"    Num = {num}")
+            new_num = num
+        return {"width":width,"val":new_num,"sign":sign}
 
     def get_info(self):
         pprint.pp(self.__dir__())
@@ -47,6 +87,84 @@ class AST_Analyzer:
             else:
                 submodname_dict[orig_name] = [inst_info]
         pprint.pp(submodname_dict)
+
+    def get_dtype_width(self,dtype):
+        if dtype.tag == "basicdtype":
+            if "left" in dtype.attrib:
+                left = int(dtype.attrib['left'])
+                right = int(dtype.attrib['right'])
+                return abs(right - left) + 1
+            else:
+                return 1
+        elif dtype.tag == "memberdtype" or dtype.tag == "refdtype" or dtype.tag == "enumdtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            return self.get_dtype_width(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
+        elif dtype.tag == "structdtype":
+            width = 0
+            for memberdtype in dtype.getchildren():
+                width += self.get_dtype_width(memberdtype)
+            return width
+        elif dtype.tag == "unpackarraydtype" or dtype.tag == "packarraydtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            left_num = int(self.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"])
+            right_num = int(self.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"])
+            return self.get_dtype_width(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']")) * (abs(left_num - right_num) + 1)
+        elif dtype.tag == "voiddtype":
+            return 0
+        else:
+            print("Error!!")
+
+
+    def get_dtype_shape(self,dtype):
+        if dtype.tag == "voiddtype":
+            return ""
+        elif dtype.tag == "basicdtype":
+            if "left" in dtype.attrib:
+                return f"[{dtype.attrib['left']}:{dtype.attrib['right']}] X "
+            else:
+                return "[0] X "
+        elif dtype.tag == "unpackarraydtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            left_num = self.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"]
+            right_num = self.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"]
+            return self.get_dtype_shape(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']")) + f"[{left_num}:{right_num}]" 
+        elif dtype.tag == "packarraydtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            left_num = self.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"]
+            right_num = self.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"]
+            return f"[{left_num}:{right_num}]" + self.get_dtype_shape(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
+        elif dtype.tag == "refdtype" or dtype.tag == "enumdtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            return self.get_dtype_shape(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
+        elif dtype.tag == "structdtype":
+            width = self.get_dtype_width(dtype)
+            return f"[{width-1}:0]X"
+        else:
+            print(f"Error-{dtype.tag}")
+
+
+    def get_dict__dtypeid_2_width(self,output=True) -> dict:
+        dtypeid_2_width_dict = {}
+        for dtype in self.ast.find(".//typetable").getchildren():
+            dtypeid_2_width_dict[dtype.attrib["id"]] = self.get_dtype_width(dtype)
+            if dtypeid_2_width_dict[dtype.attrib["id"]] == 0:
+                print(f"    warning: dtype_id = {dtype.attrib['id']}, width = {dtypeid_2_width_dict[dtype.attrib['id']]}")
+        return dtypeid_2_width_dict
+
+    def get_dict__dtypeid_2_shape(self,output=True) -> dict:
+        dtypeid_2_shape_dict = {}
+        for dtype in self.ast.find(".//typetable").getchildren():
+            dtypeid_2_shape_dict[dtype.attrib["id"]] = self.get_dtype_shape(dtype)
+        return dtypeid_2_shape_dict
+
+    def get_dict__signame_2_width(self,sig_list):
+        dtypeid_2_width_dict = self.get_dict__dtypeid_2_width()
+        signame_2_width_dict = {}
+        for sig_name in sig_list:
+            var_node = self.ast.find(f".//var[@name='{sig_name}']")
+            width = dtypeid_2_width_dict[var_node.attrib["dtype_id"]]
+            signame_2_width_dict[sig_name] = width
+        return signame_2_width_dict
 
     def get_dtypetable_as_dict(self,output=True) -> dict:
         dtypes_dict = dict()
@@ -135,6 +253,7 @@ class AST_Analyzer:
         if output:
             pprint.pp(children_set)
         return children_set
+
     def get_ordered_children_under(self,target="verilator_xml",output=True) -> list:
         # Make a List of All Kinds of Tags.
         childrens = []
@@ -153,7 +272,7 @@ class AST_Analyzer:
 
     def get_signal_dicts(self):
         # Check AST Simple
-        self.check_simple_design()
+        #self.check_simple_design()
 
         print("Getting Signal Lists...")
         # Get Signal List
@@ -201,15 +320,32 @@ class AST_Analyzer:
         print("DONE!!!")
         return {"input":input_var_dict,"ff":ff_var_dict,"output":output_var_dict}
 
+    def _get_lv_sig_name(self,node):
+        if node.tag == "varref":
+            sig_name = node.attrib["name"]
+            return sig_name
+        elif node.tag == "sel" or node.tag == "arraysel":
+            return self._get_lv_sig_name(node.getchildren()[0])
+        else:
+            raise Unconsidered_Case("",0)
+
     def get_input_port(self):
         return [var.attrib["name"] for var in self.ast.findall(".//var[@dir='input']")]
 
     def get_ff(self):
-        return [assigndly.getchildren()[1].attrib["name"] for assigndly in self.ast.findall(".//assigndly")]
+        return [self._get_lv_sig_name(assigndly.getchildren()[1]) for assigndly in self.ast.findall(".//assigndly")]
 
     def get_output_port(self):
         ff_list = self.get_ff()
         return [var.attrib["name"] for var in self.ast.findall(".//var[@dir='output']") if not var.attrib["name"] in ff_list]
+
+    def dump_sig_dict(self, file_name, sig_dict):
+        with open(file_name,"w") as f:
+            f.write(json.dumps(sig_dict, indent=4))
+            f.close()
+
+
+
 
 def Verilator_AST_Tree(ast_file_path:str) -> etree._ElementTree:
     return etree.parse(ast_file_path)
@@ -231,9 +367,20 @@ if __name__ == "__main__":
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    #analyzer.get_info()
+    pprint.pp(analyzer.get_dict__dtypeid_2_shape())
+    #ff_list = analyzer.get_signal_dicts()
+    #print(ff_list)
     #analyzer.check_simple_design()
-    analyzer.get_ordered_children_under("always")
+    #analyzer.get_ordered_children_under("always//case/caseitem")
+    #analyzer.get_unique_children_under("comment")
+    #ff_list = analyzer.get_ff()
+    #signame_2_width = analyzer.get_dict__signame_2_width(ff_list)
+    #total_bit = 0
+    #for sig in signame_2_width:
+    #    total_bit += signame_2_width[sig]
+    #analyzer.dump_sig_dict("ffname_2_width_dict.json",signame_2_width)
+    #print(total_bit)
+    #pprint.pp(analyzer.get_dict__signame_2_width(ff_list))
     #for a in ast.findall(".//caseitem/and"):
     #    print(a.attrib)
 

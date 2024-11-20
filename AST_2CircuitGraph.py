@@ -7,39 +7,6 @@ import pandas as pd
 import json
 
 
-# Convert a Verilog Format Number to a Decimal Python Number
-def verilog_num2num(num:str):
-    width = None
-    sign = None
-    if "'" in num:
-        split_num = num.split("'")
-        width = split_num[0]
-        if "s" in split_num[1]:
-            radix = split_num[1][0:2]
-            new_num = split_num[1][2:]
-            sign = "1"
-        else:
-            radix = split_num[1][0]
-            new_num = split_num[1][1:]
-            sign = "0"
-        if (radix == "h" or radix == "sh"):
-            new_num = str(int(new_num,16))
-        elif (radix == "d"):
-            new_num = str(int(new_num,10))
-        elif (radix == "o"):
-            new_num = str(int(new_num,8))
-        elif(radix == "b"):
-            new_num = str(int(new_num,2))
-        else:
-            print("Error: Unknown Radix!")
-            print(f"    Num = {num}")
-    else:
-        print("Warning: Not A Verilog Formatted Number.")
-        print(f"    Num = {num}")
-        new_num = num
-    return {"width":width,"val":new_num,"sign":sign}
-
-
 # Define the RTL Circuit Graph Node Data Structure
 class Node:
     def __init__(self,name:str,width:int,value:str,node_type:str,fault_list:dict):
@@ -198,8 +165,8 @@ class AST_2CircuitGraph(AST_NodeClassify):
 
         print("Modifying <sel>")
         for sel in self._ast.findall(".//sel"):
-            start_bit = int(verilog_num2num(sel.getchildren()[1].attrib["name"])["val"])
-            width = int(verilog_num2num(sel.getchildren()[2].attrib["name"])["val"])
+            start_bit = int(self.verilog_num2num(sel.getchildren()[1].attrib["name"])["val"])
+            width = int(self.verilog_num2num(sel.getchildren()[2].attrib["name"])["val"])
             end_bit = start_bit + width - 1
             sel.attrib["name"] = f"[{end_bit}:{start_bit}]"
             sel.remove(sel.getchildren()[1])
@@ -214,7 +181,7 @@ class AST_2CircuitGraph(AST_NodeClassify):
 
     def modify_const_node(self):
         for const in self._ast.findall(".//always_ff//const") + self._ast.findall(".//always//const") + self._ast.findall(".//contassign//const"):
-            num_dict = verilog_num2num(const.attrib["name"])
+            num_dict = self.verilog_num2num(const.attrib["name"])
             width = int(num_dict["width"])
             name = int(num_dict["val"])
             name = bin(name).split("b")[-1]
