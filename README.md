@@ -2,6 +2,7 @@
 ## Prerequisite
 1. verilator v5.024
 2. python3
+3. lxml -- 5.3.0
 ```
 apt-get update
 apt-get install python3-pip
