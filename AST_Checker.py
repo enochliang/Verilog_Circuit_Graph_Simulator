@@ -33,10 +33,16 @@ class AST_Checker(AST_Analyzer):
 
     def _ast_preprocess(self):
         self._remove_comment_node()
+        self._remove_empty_initial()
 
     def _remove_comment_node(self):
         for comment in self.ast.findall(".//comment"):
             comment.getparent().remove(comment)
+
+    def _remove_empty_initial(self):
+        for initial in self.ast.findall(".//initial"):
+            if len(initial.getchildren()) == 0:
+                initial.getparent().remove(initial)
 
 
     def _check_circuit_no_voiddtype(self):
@@ -519,15 +525,28 @@ class AST_Checker(AST_Analyzer):
         print("-"*80)
 
 
+    #def _check_initial_no_multidriven(self):
+    #    for assign in self.ast.findall(".//initial//assign"):
+    #        lv_node = assign.getchildren()[0]
+
+
+    def _check_initial_simple(self):
+        print("[Checker Task] start checking <initial> only has 1 <assign>.")
+        for initial in self.ast.findall(".//initial"):
+            if self.get_ordered_children(initial) != ["assign"]:
+                self._get_loc_info(initial)
+                print("  - [Checker Report] warning: found an <initial> not only assigns one signal.")
+        for assign in self.ast.findall(".//initial//assign"):
+            if self.get_ordered_children(assign) != ["const","varref"]:
+                self._get_loc_info(initial)
+                print("  - [Checker Report] warning: found an <initial/assign> not assigns <varref> with a <const>.")
+        print("-"*80)
+            
 
     def check_simple_design(self):
         print("#########################################")
         print("#    Start Checking Simple Design ...   #")
         print("#########################################")
-        #self._check_no_array()
-        #self._check_sel_no_muxdec()
-        #self._check_lv_single_var()
-        #self._check_lv_only_left()
         self._ast_preprocess()
 
         self._check_circuit_no_voiddtype()
@@ -536,16 +555,10 @@ class AST_Checker(AST_Analyzer):
         self._check_circuit_no_loop()
         self._check_assign_no_concat_lv()
         self._check_comb_always_only_one_lv()
-        #self._check_ff_always_no_sel_lv()
         self._check_ff_always_no_blking_assign()
-        #self._check_comb_always_no_seq_assign()
-        #self._check_comb_always_fullcase()
-        #self._check_ff_always_only_one_lv()
-        #self._check_ff_always_fullcase()
-        #self._check_non_blocking_always_assignment()
+        self._check_initial_simple()
         self._check_assign_no_param()
         self._check_param_not_in_circuit()
-        #self._check_always_only_one_assign()
 
 
 if __name__ == "__main__":

@@ -254,13 +254,16 @@ class AST_Analyzer:
             pprint.pp(children_set)
         return children_set
 
+    def get_ordered_children(self,node):
+        return [child_node.tag for child_node in node.getchildren()]
+
     def get_ordered_children_under(self,target="verilator_xml",output=True) -> list:
         # Make a List of All Kinds of Tags.
         childrens = []
         target_nodes = self.ast.findall(".//"+target)
         if target_nodes:
             for t_node in target_nodes:
-                children = [node.tag for node in t_node.getchildren()]
+                children = get_ordered_children(t_node)
                 if not children in childrens:
                     childrens.append(children)
             if output:
@@ -328,6 +331,16 @@ class AST_Analyzer:
             return self._get_lv_sig_name(node.getchildren()[0])
         else:
             raise Unconsidered_Case("",0)
+    def _get_lv_sig_node(self,node):
+        if node.tag == "varref":
+            return node
+        elif node.tag == "sel" or node.tag == "arraysel":
+            return self._get_lv_sig_node(node.getchildren()[0])
+        else:
+            raise Unconsidered_Case("",0)
+
+    def get_lv(self):
+        return [self._get_lv_sig_name(assign.getchildren()[1]) for assign in self.ast.findall(".//initial//assign") + self.ast.findall(".//always//assigndly") + self.ast.findall(".//always//assign") + self.ast.findall(".//contassign")]
 
     def get_input_port(self):
         return [var.attrib["name"] for var in self.ast.findall(".//var[@dir='input']")]
@@ -367,21 +380,6 @@ if __name__ == "__main__":
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    pprint.pp(analyzer.get_dict__dtypeid_2_shape())
-    #ff_list = analyzer.get_signal_dicts()
-    #print(ff_list)
-    #analyzer.check_simple_design()
-    #analyzer.get_ordered_children_under("always//case/caseitem")
-    #analyzer.get_unique_children_under("comment")
-    #ff_list = analyzer.get_ff()
-    #signame_2_width = analyzer.get_dict__signame_2_width(ff_list)
-    #total_bit = 0
-    #for sig in signame_2_width:
-    #    total_bit += signame_2_width[sig]
-    #analyzer.dump_sig_dict("ffname_2_width_dict.json",signame_2_width)
-    #print(total_bit)
-    #pprint.pp(analyzer.get_dict__signame_2_width(ff_list))
-    #for a in ast.findall(".//caseitem/and"):
-    #    print(a.attrib)
+    analyzer.get_ordered_children_under("arraysel")
 
 
