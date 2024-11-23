@@ -51,17 +51,14 @@ class Ctrl_Flow_Graph_Node:
     def get_info(self):
         pprint.pp(self.__dict__)
 
-class AST_Schedule(AST_NodeClassify):
+class AST_Schedule_Preprocess:
     def __init__(self,ast):
-        AST_NodeClassify.__init__(self)
         self._ast = ast
 
-    def merge_aliased_var(self):
+    def merge_multi_name_var(self):
         # Merge the <varref> that have different names but refer to same signal
         # Unify their names
-        print("Start Merging Multi-named Signals...")
-        idx = 0
-        signal_num_dict = dict()
+        print("[AST Schedule Preprocess] start merging multi-named signals...")
         signal_merge_dict = dict()
         signal_buckets = list()
 
@@ -90,7 +87,7 @@ class AST_Schedule(AST_NodeClassify):
 
         # Merging Node with Same Name
         for main_sig in signal_merge_dict:
-            print(f"    Merge: {main_sig} <= {signal_merge_dict[main_sig]}")
+            self._show_merge_info(main_sig,signal_merge_dict[main_sig])
             for sig in signal_merge_dict[main_sig]:
                 # Remove <varscope>
                 if sig != main_sig:
@@ -100,6 +97,17 @@ class AST_Schedule(AST_NodeClassify):
                     self._remove_ast_node(varscope)
                     var = self._ast.find(f".//var[@name='{sig}']")
                     self._remove_ast_node(var)
+        print("-"*80)
+
+    def _show_merge_info(self,main_sig, merge_sig):
+        indent = len(f"  - merging: {main_sig} <= ")
+        for idx, sig in enumerate(merge_sig):
+            if idx == 0:
+                print(f"  - merging: {main_sig} <= {sig}")
+            else:
+                print(" "*indent+f"{sig}")
+        print()
+
 
     def merge_initial_var_const(self):
         for init_assign in self._ast.findall(".//initial/assign"):
@@ -125,7 +133,7 @@ class AST_Schedule(AST_NodeClassify):
         self.remove_empty_initial()
         self.remove_param_var()
 
-        self.merge_aliased_var()
+        self.merge_multi_name_var()
         self.merge_initial_var_const()
 
         self.mark_var_sig_type()
@@ -152,13 +160,6 @@ class AST_Schedule(AST_NodeClassify):
             elif "localparam" in var.attrib:
                 self._remove_ast_node(var)
 
-    def find_register_var(self):
-        analyzer = AST_Analyzer(self._ast)
-        return analyzer.get_ff()
-
-    def find_input_var(self):
-        analyzer = AST_Analyzer(self._ast)
-        return analyzer.get_input_port()
 
     def mark_var_sig_type(self):
         register_name_set = set(self.find_register_var())
@@ -188,8 +189,6 @@ class AST_Schedule(AST_NodeClassify):
             lv_sig_name = self._get_lv_sig_name(lv_node)
             always.attrib["lv_name"] = lv_sig_name
 
-
-
     def _get_lv_sig_name(self,node):
         if node.tag == "varref":
             sig_name = node.attrib["name"]
@@ -200,29 +199,32 @@ class AST_Schedule(AST_NodeClassify):
             raise Unconsidered_Case("",0)
 
     def numbering_subcircuit(self):
-        print("start numbering subcircuits...")
+        print("[AST Schedule Preprocess] start numbering subcircuits...")
         self.subcircuit_num = 0
         for sub_circuit in self._ast.findall(".//contassign") + self._ast.findall(".//always"):
             sub_circuit.attrib["subcircuit_id"] = str(self.subcircuit_num)
             self.subcircuit_num += 1
-        print(f"finished. total number of subcircuit = {self.subcircuit_num}")
+        print(f"  - finished. total number of subcircuit = {self.subcircuit_num}")
+        print("-"*80)
 
     def numbering_assignment(self):
-        print("start numbering assignment...")
+        print("[AST Schedule Preprocess] start numbering assignment...")
         self.assignment_num = 0
         for assign in self._ast.findall(".//contassign") + self._ast.findall(".//always//assign") + self._ast.findall(".//always//assigndly"):
             assign.attrib["assignment_id"] = str(self.assignment_num)
             self.assignment_num += 1
-        print(f"finished. total number of assignment = {self.assignment_num}")
+        print(f"  - finished. total number of assignment = {self.assignment_num}")
+        print("-"*80)
 
 
     def numbering_circuit_node(self):
-        print("start numbering circuit node...")
+        print("[AST Schedule Preprocess] start numbering circuit node...")
         self.circuit_node_num = 0
         self.numbering_var_node()
         self.numbering_ctrl_node()
         self.numbering_op_node()
-        print(f"finished. total number of circuit node = {self.circuit_node_num}")
+        print(f"  - finished. total number of circuit node = {self.circuit_node_num}")
+        print("-"*80)
 
     def numbering_var_node(self):
         for var in self._ast.findall("var"):
@@ -247,6 +249,27 @@ class AST_Schedule(AST_NodeClassify):
                     node.attrib["circuit_node_id"] = str(self.circuit_node_num)
                     self.circuit_node_num += 1
 
+    def find_register_var(self):
+        analyzer = AST_Analyzer(self._ast)
+        return analyzer.get_ff()
+
+    def find_input_var(self):
+        analyzer = AST_Analyzer(self._ast)
+        return analyzer.get_input_port()
+
+    def _find_dst_var_node(self,lv_node):
+        if lv_node.tag == "arraysel" or lv_node.tag == "sel":
+            target_node = lv_node.getchildren()[0]
+            return self._find_dst_var_node(target_node)
+        elif lv_node.tag == "varref":
+            return lv_node
+        else:
+            raise Unconsidered_Case(f"node tag = {lv_node.tag}",0)
+
+
+class AST_Schedule_Subcircuit(AST_Schedule_Preprocess):
+    def __init__(self,ast):
+        AST_Schedule_Preprocess.__init__(self,ast)
 
     def schedule(self):
         self.preprocess()
@@ -257,10 +280,11 @@ class AST_Schedule(AST_NodeClassify):
         self.subcircuit_id_list = [subcircuit_id for subcircuit_id in range(self.subcircuit_num)]
         self.ordered_subcircuit_id_list = []
         self.ordered_subcircuit_id_tail = []
+        self.ordered_subcircuit_id_head = []
 
         self._schedule_ff_always()
         self._schedule_comb_subcircuit()
-        print(len(self.ordered_subcircuit_id_list))
+        print(f"Finished. Total Scheduled Subcircuit Number = {len(self.ordered_subcircuit_id_list)}")
 
     def _schedule_ff_always(self):
         for always in self._ast_schedule.findall(".//always"):
@@ -282,13 +306,14 @@ class AST_Schedule(AST_NodeClassify):
             self._update_ready_node(new_ready_subcircuit_list)
             self._remove_ready_node(new_ready_subcircuit_list)
 
-        
+        self.ordered_subcircuit_id_head = self.ordered_subcircuit_id_list
         self.ordered_subcircuit_id_list = self.ordered_subcircuit_id_list + self.ordered_subcircuit_id_tail
+        self.output()
 
     def output(self):
-        with open("output.xml","wb") as fp:
-            fp.write(etree.tostring(self._ast_schedule.find(".")))
-    
+        with open("output.xml","w") as fp:
+            fp.write(etree.tostring(self._ast_schedule.find("."),pretty_print=True).decode())
+
     def _find_ready_subcircuit(self):
         new_ready_subcircuit_list = []
         for subcircuit_id in self.subcircuit_id_list:
@@ -301,13 +326,11 @@ class AST_Schedule(AST_NodeClassify):
                 new_ready_subcircuit_list.append((subcircuit_id,lv_name))
         return new_ready_subcircuit_list
 
-
     def _update_ready_node(self,ready_subcircuit_list):
         ready_subcircuit_id_list = [ready_subcircuit[0] for ready_subcircuit in ready_subcircuit_list]
         for ready_subcircuit_id in ready_subcircuit_id_list:
             self.subcircuit_id_list.remove(ready_subcircuit_id)
             self.ordered_subcircuit_id_list.append(ready_subcircuit_id)
-
 
     def _remove_ready_node(self,ready_subcircuit_list):
         ready_sig_name_set = set([ready_subcircuit[1] for ready_subcircuit in ready_subcircuit_list])
@@ -317,7 +340,6 @@ class AST_Schedule(AST_NodeClassify):
                 var_name = varref.attrib["name"]
                 if var_name in ready_sig_name_set:
                     self._remove_ast_node(varref)
-
     
     def _remove_ast_node(self,node):
         node.getparent().remove(node)
@@ -335,7 +357,6 @@ class AST_Schedule(AST_NodeClassify):
                 if not "assign" in self._ast_schedule.getpath(varref):
                     self._remove_ast_node(varref)
 
-
     def _remove_src_input_port(self):
         input_name_set = set(self.find_input_var())
         for assign in self._ast_schedule.findall(".//contassign") + self._ast_schedule.findall(".//always//assign"):
@@ -350,7 +371,6 @@ class AST_Schedule(AST_NodeClassify):
             for varref in self._ast_schedule.findall(f".//always//varref[@name='{register_name}']"):
                 if not "assign" in self._ast_schedule.getpath(varref):
                     self._remove_ast_node(varref)
-
 
     def _remove_src_register(self):
         register_name_set = set(self.find_register_var())
@@ -368,16 +388,13 @@ class AST_Schedule(AST_NodeClassify):
             for varref in always.findall(f".//varref[@name='{lv_name}']"):
                 self._remove_ast_node(varref)
 
+class AST_Construct_CFGraph(AST_Schedule_Preprocess):
+    def __init__(self,ast):
+        AST_Schedule_Preprocess.__init__(self,ast)
 
-    def _find_dst_var_node(self,lv_node):
-        if lv_node.tag == "arraysel" or lv_node.tag == "sel":
-            target_node = lv_node.getchildren()[0]
-            return self._find_dst_var_node(target_node)
-        elif lv_node.tag == "varref":
-            return lv_node
-        else:
-            raise Unconsidered_Case(f"node tag = {lv_node.tag}",0)
-
+    def construct_cfg(self):
+        for subcircuit_id in self.subcircuit_num:
+            pass
 
 
 if __name__ == "__main__":
@@ -393,7 +410,7 @@ if __name__ == "__main__":
     ast_file = args.ast
     ast = Verilator_AST_Tree(ast_file)
 
-    ast_scheduler = AST_Schedule(ast)
+    ast_scheduler = AST_Schedule_Subcircuit(ast)
     ast_scheduler.schedule()
 
 
