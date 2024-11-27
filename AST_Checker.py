@@ -326,7 +326,7 @@ class AST_Checker(AST_Analyzer):
             for assign in always.findall(".//assigndly"):
                 if assign.getchildren()[1].tag == "sel":
                     print("  - [Checker Report] warning: found a <sel> on the left of <assigndly>.")
-                    lv_name = self._get_lv_sig_name(assign.getchildren()[1])
+                    lv_name = AST_Analyzer.get_sig_name(assign.getchildren()[1])
                     print(f"    lv-name = {lv_name}")
                     self._show_loc_info(assign.getchildren()[1])
 
@@ -373,7 +373,7 @@ class AST_Checker(AST_Analyzer):
                 continue
             lv_set = set()
             for assign in always.findall(".//assign"):
-                name = self._get_lv_sig_name(assign.getchildren()[1])
+                name = AST_Analyzer.get_sig_name(assign.getchildren()[1])
                 lv_set.add(name)
 
             if len(lv_set) > 1:

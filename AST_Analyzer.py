@@ -254,6 +254,7 @@ class AST_Analyzer:
             pprint.pp(children_set)
         return children_set
 
+
     def get_ordered_children(self,node):
         return [child_node.tag for child_node in node.getchildren()]
 
@@ -263,7 +264,7 @@ class AST_Analyzer:
         target_nodes = self.ast.findall(".//"+target)
         if target_nodes:
             for t_node in target_nodes:
-                children = get_ordered_children(t_node)
+                children = self.get_ordered_children(t_node)
                 if not children in childrens:
                     childrens.append(children)
             if output:
@@ -323,30 +324,49 @@ class AST_Analyzer:
         print("DONE!!!")
         return {"input":input_var_dict,"ff":ff_var_dict,"output":output_var_dict}
 
-    def _get_lv_sig_name(self,node):
-        if node.tag == "varref":
-            sig_name = node.attrib["name"]
-            return sig_name
-        elif node.tag == "sel" or node.tag == "arraysel":
-            return self._get_lv_sig_name(node.getchildren()[0])
-        else:
-            raise Unconsidered_Case("",0)
-    def _get_lv_sig_node(self,node):
+    @staticmethod
+    def node_has_child(node):
+        return len(node.getchildren()) > 0
+
+    @staticmethod
+    def get_sig_name(node):
+        target_node = AST_Analyzer.get_sig_node(node)
+        return target_node.attrib["name"]
+
+    @staticmethod
+    def get_sig_node(node):
         if node.tag == "varref":
             return node
         elif node.tag == "sel" or node.tag == "arraysel":
-            return self._get_lv_sig_node(node.getchildren()[0])
+            return AST_Analyzer.get_sig_node(node.getchildren()[0])
         else:
             raise Unconsidered_Case("",0)
 
+    @staticmethod
+    def ast_get_lv(ast):
+        return [AST_Analyzer.get_sig_name(assign.getchildren()[1]) for assign in ast.findall(".//initial//assign") + ast.findall(".//always//assigndly") + ast.findall(".//always//assign") + ast.findall(".//contassign")]
+
     def get_lv(self):
-        return [self._get_lv_sig_name(assign.getchildren()[1]) for assign in self.ast.findall(".//initial//assign") + self.ast.findall(".//always//assigndly") + self.ast.findall(".//always//assign") + self.ast.findall(".//contassign")]
+        return [AST_Analyzer.get_sig_name(assign.getchildren()[1]) for assign in self.ast.findall(".//initial//assign") + self.ast.findall(".//always//assigndly") + self.ast.findall(".//always//assign") + self.ast.findall(".//contassign")]
+
+    @staticmethod
+    def ast_get_input_port(ast):
+        return [var.attrib["name"] for var in ast.findall(".//var[@dir='input']")]
 
     def get_input_port(self):
         return [var.attrib["name"] for var in self.ast.findall(".//var[@dir='input']")]
 
+    @staticmethod
+    def ast_get_ff(ast):
+        return [AST_Analyzer.get_sig_name(assigndly.getchildren()[1]) for assigndly in ast.findall(".//assigndly")]
+
     def get_ff(self):
-        return [self._get_lv_sig_name(assigndly.getchildren()[1]) for assigndly in self.ast.findall(".//assigndly")]
+        return [AST_Analyzer.get_sig_name(assigndly.getchildren()[1]) for assigndly in self.ast.findall(".//assigndly")]
+
+    @staticmethod
+    def ast_get_output_port(ast):
+        ff_list = AST_Analyzer.ast_get_ff(ast)
+        return [var.attrib["name"] for var in ast.findall(".//var[@dir='output']") if not var.attrib["name"] in ff_list]
 
     def get_output_port(self):
         ff_list = self.get_ff()
@@ -380,6 +400,6 @@ if __name__ == "__main__":
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    analyzer.get_ordered_children_under("arraysel")
+    analyzer.get_ordered_children_under("caseitem")
 
 
