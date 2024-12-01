@@ -67,6 +67,24 @@ class AST_Analysis_Function:
                 node_list += AST_Analysis_Function.dfs_iter(child)
         node_list.append(node)
         return node_list
+    @staticmethod
+    def dfs_iter_until_assign(node):
+        children = node.getchildren()
+        node_list = []
+        if len(children) > 0 and not "assign" in node.tag:
+            if node.tag == "if" or node.tag == "case":
+                for child in children[1:]:
+                    node_list += AST_Analysis_Function.dfs_iter_until_assign(child)
+            elif node.tag == "caseitem":
+                for child in children:
+                    if "dtype_id" in child.attrib:
+                        continue
+                    node_list += AST_Analysis_Function.dfs_iter_until_assign(child)
+            else:
+                for child in children:
+                    node_list += AST_Analysis_Function.dfs_iter_until_assign(child)
+        node_list.append(node)
+        return node_list
 
     @staticmethod
     def get_dtype__not_logic(ast,output=True) -> set:
@@ -449,6 +467,12 @@ if __name__ == "__main__":
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    analyzer.get_children__ordered_under("caseitem")
+    analyzer.get_tag__all_under("assigndly")
 
+    t_set = set()
+    for entry in ast.findall(".//always"):
+        for node in AST_Analysis_Function.dfs_iter_until_assign(entry):
+            t_set.add(node.tag)
+
+    print(t_set)
 
