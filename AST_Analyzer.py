@@ -18,13 +18,16 @@ class Unconsidered_Case(Exception):
     def __str__(self):
         return f"{self.args[0]} (Error Code: {self.error_code})"
 
-
-class AST_Analyzer:
+class AST_Analysis_Function:
     def __init__(self, ast: etree._ElementTree):
        self.ast = ast
 
+    def help(self):
+        pprint.pp(self.__dir__())
+
+    @staticmethod
     # Convert a Verilog Format Number to a Decimal Python Number
-    def verilog_num2num(self,num:str):
+    def verilog_num2num(num:str):
         width = None
         sign = None
         if "'" in num:
@@ -55,27 +58,94 @@ class AST_Analyzer:
             new_num = num
         return {"width":width,"val":new_num,"sign":sign}
 
-    def get_info(self):
-        pprint.pp(self.__dir__())
+    @staticmethod
+    def dfs_iter(node):
+        children = node.getchildren()
+        node_list = []
+        if len(children) > 0:
+            for child in children:
+                node_list += AST_Analysis_Function.dfs_iter(child)
+        node_list.append(node)
+        return node_list
 
-    def get_all_signal(self,output=True):
-        # Make a List of All Signals Including WIRE & Flip-Flop.
-        signals = set()
-        for var in self.ast.findall(".//assignalias//*[2]") + self.ast.findall(".//contassign//*[2]") + self.ast.findall(".//always//assign//*[2]") + self.ast.findall(".//always//assigndly//*[2]"):
-            if var.tag != "varref":
-                print("Error: LV is not a varref.")
-                print("    Tag: "+var.tag)
+    @staticmethod
+    def get_dtype__not_logic(ast,output=True) -> set:
+        # Get the List Dtypes That is Not a Logic or Bit.
+        n_logic_dtypes = set()
+        for dtype in ast.findall(".//typetable//basicdtype"):
+            if dtype.attrib["name"] == "logic":
+                pass
+            elif dtype.attrib["name"] == "bit":
+                pass
             else:
-                signals.add(var.attrib["name"])
+                n_logic_dtypes.add(dtype.attrib["name"])
+        #for dtype in self.ast.findall(".//typetable//basicdtype"):
         if output:
-            print("Print All Signals Including WIRE & Flip-Flop...")
-            for sig in signals:
-                print("  "+sig)
-        return signals
+            for dtype in n_logic_dtypes:
+                print(dtype)
+        return n_logic_dtypes
 
-    def _show_all_submodname(self):
+    @staticmethod
+    def get_dtype_width(dtype):
+        ast = dtype.getroottree().getroot()
+        if dtype.tag == "basicdtype":
+            if "left" in dtype.attrib:
+                left = int(dtype.attrib['left'])
+                right = int(dtype.attrib['right'])
+                return abs(right - left) + 1
+            else:
+                return 1
+        elif dtype.tag == "memberdtype" or dtype.tag == "refdtype" or dtype.tag == "enumdtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            return AST_Analysis_Function.get_dtype_width(ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
+        elif dtype.tag == "structdtype":
+            width = 0
+            for memberdtype in dtype.getchildren():
+                width += AST_Analysis_Function.get_dtype_width(memberdtype)
+            return width
+        elif dtype.tag == "unpackarraydtype" or dtype.tag == "packarraydtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            left_num = int(AST_Analysis_Function.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"])
+            right_num = int(AST_Analysis_Function.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"])
+            return AST_Analysis_Function.get_dtype_width(ast.find(f".//typetable/*[@id='{sub_dtype_id}']")) * (abs(left_num - right_num) + 1)
+        elif dtype.tag == "voiddtype":
+            return 0
+        else:
+            print("Error!!")
+
+    @staticmethod
+    def get_dtype_shape(dtype):
+        ast = dtype.getroottree().getroot()
+        if dtype.tag == "voiddtype":
+            return ""
+        elif dtype.tag == "basicdtype":
+            if "left" in dtype.attrib:
+                return f"[{dtype.attrib['left']}:{dtype.attrib['right']}] X "
+            else:
+                return "[0] X "
+        elif dtype.tag == "unpackarraydtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            left_num = AST_Analysis_Function.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"]
+            right_num = AST_Analysis_Function.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"]
+            return AST_Analysis_Function.get_dtype_shape(ast.find(f".//typetable/*[@id='{sub_dtype_id}']")) + f"[{left_num}:{right_num}]" 
+        elif dtype.tag == "packarraydtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            left_num = AST_Analysis_Function.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"]
+            right_num = AST_Analysis_Function.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"]
+            return f"[{left_num}:{right_num}]" + AST_Analysis_Function.get_dtype_shape(ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
+        elif dtype.tag == "refdtype" or dtype.tag == "enumdtype":
+            sub_dtype_id = dtype.attrib["sub_dtype_id"]
+            return AST_Analysis_Function.get_dtype_shape(ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
+        elif dtype.tag == "structdtype":
+            width = AST_Analysis_Function.get_dtype_width(dtype)
+            return f"[{width-1}:0]X"
+        else:
+            print(f"Error-{dtype.tag}")
+
+    @staticmethod
+    def show_all_submodname(ast):
         submodname_dict = {}
-        for module in self.ast.findall(".//module"):
+        for module in ast.findall(".//module"):
             orig_name = module.attrib["origName"]
             inst_name = module.attrib["name"]
             params = {}
@@ -88,101 +158,138 @@ class AST_Analyzer:
                 submodname_dict[orig_name] = [inst_info]
         pprint.pp(submodname_dict)
 
-    def get_dtype_width(self,dtype):
-        if dtype.tag == "basicdtype":
-            if "left" in dtype.attrib:
-                left = int(dtype.attrib['left'])
-                right = int(dtype.attrib['right'])
-                return abs(right - left) + 1
-            else:
-                return 1
-        elif dtype.tag == "memberdtype" or dtype.tag == "refdtype" or dtype.tag == "enumdtype":
-            sub_dtype_id = dtype.attrib["sub_dtype_id"]
-            return self.get_dtype_width(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
-        elif dtype.tag == "structdtype":
-            width = 0
-            for memberdtype in dtype.getchildren():
-                width += self.get_dtype_width(memberdtype)
-            return width
-        elif dtype.tag == "unpackarraydtype" or dtype.tag == "packarraydtype":
-            sub_dtype_id = dtype.attrib["sub_dtype_id"]
-            left_num = int(self.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"])
-            right_num = int(self.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"])
-            return self.get_dtype_width(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']")) * (abs(left_num - right_num) + 1)
-        elif dtype.tag == "voiddtype":
-            return 0
-        else:
-            print("Error!!")
-
-
-    def get_dtype_shape(self,dtype):
-        if dtype.tag == "voiddtype":
-            return ""
-        elif dtype.tag == "basicdtype":
-            if "left" in dtype.attrib:
-                return f"[{dtype.attrib['left']}:{dtype.attrib['right']}] X "
-            else:
-                return "[0] X "
-        elif dtype.tag == "unpackarraydtype":
-            sub_dtype_id = dtype.attrib["sub_dtype_id"]
-            left_num = self.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"]
-            right_num = self.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"]
-            return self.get_dtype_shape(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']")) + f"[{left_num}:{right_num}]" 
-        elif dtype.tag == "packarraydtype":
-            sub_dtype_id = dtype.attrib["sub_dtype_id"]
-            left_num = self.verilog_num2num(dtype.find(".//range/const[1]").attrib["name"])["val"]
-            right_num = self.verilog_num2num(dtype.find(".//range/const[2]").attrib["name"])["val"]
-            return f"[{left_num}:{right_num}]" + self.get_dtype_shape(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
-        elif dtype.tag == "refdtype" or dtype.tag == "enumdtype":
-            sub_dtype_id = dtype.attrib["sub_dtype_id"]
-            return self.get_dtype_shape(self.ast.find(f".//typetable/*[@id='{sub_dtype_id}']"))
-        elif dtype.tag == "structdtype":
-            width = self.get_dtype_width(dtype)
-            return f"[{width-1}:0]X"
-        else:
-            print(f"Error-{dtype.tag}")
-
-
-    def get_dict__dtypeid_2_width(self,output=True) -> dict:
+    @staticmethod
+    def get_dict__dtypeid_2_width(ast):
         dtypeid_2_width_dict = {}
-        for dtype in self.ast.find(".//typetable").getchildren():
-            dtypeid_2_width_dict[dtype.attrib["id"]] = self.get_dtype_width(dtype)
+        for dtype in ast.find(".//typetable").getchildren():
+            dtypeid_2_width_dict[dtype.attrib["id"]] = AST_Analysis_Function.get_dtype_width(dtype)
             if dtypeid_2_width_dict[dtype.attrib["id"]] == 0:
                 print(f"    warning: dtype_id = {dtype.attrib['id']}, width = {dtypeid_2_width_dict[dtype.attrib['id']]}")
         return dtypeid_2_width_dict
 
-    def get_dict__dtypeid_2_shape(self,output=True) -> dict:
+    @staticmethod
+    def get_dict__dtypeid_2_shape(ast) -> dict:
         dtypeid_2_shape_dict = {}
-        for dtype in self.ast.find(".//typetable").getchildren():
-            dtypeid_2_shape_dict[dtype.attrib["id"]] = self.get_dtype_shape(dtype)
+        for dtype in ast.find(".//typetable").getchildren():
+            dtypeid_2_shape_dict[dtype.attrib["id"]] = AST_Analysis_Function.get_dtype_shape(dtype)
         return dtypeid_2_shape_dict
-
-    def get_dict__signame_2_width(self,sig_list):
-        dtypeid_2_width_dict = self.get_dict__dtypeid_2_width()
+    
+    @staticmethod
+    def get_dict__signame_2_width(ast,sig_list):
+        dtypeid_2_width_dict = AST_Analysis_Function.get_dict__dtypeid_2_width(ast)
         signame_2_width_dict = {}
         for sig_name in sig_list:
-            var_node = self.ast.find(f".//var[@name='{sig_name}']")
+            var_node = ast.find(f".//var[@name='{sig_name}']")
             width = dtypeid_2_width_dict[var_node.attrib["dtype_id"]]
             signame_2_width_dict[sig_name] = width
         return signame_2_width_dict
 
-    def get_dtypetable_as_dict(self,output=True) -> dict:
+    @staticmethod
+    def get_dict__dtypetable(ast,output=True) -> dict:
         dtypes_dict = dict()
-        for node in self.ast.find(".//typetable").getchildren():
+        for node in ast.find(".//typetable").getchildren():
             if node.tag == "voiddtype":
                 continue
             if "name" in node.attrib:
                 if node.attrib["id"] in dtypes_dict.keys():
                     raise Exception("Repeated dtype_id!")
                 dtypes_dict[node.attrib["id"]] = node.attrib["name"]
-            basic_node = self._search_basic_dtype(node)
+            basic_node = AST_Analysis_Function.search_basic_dtype(node)
             dtypes_dict[node.attrib["id"]] = basic_node.attrib["name"]
         if output:
             print("Dtypetable Dictionary:")
             for dtype in dtypes_dict.items():
                 print("  "+str(dtype))
         return dtypes_dict
-    def _search_basic_dtype(self,node):
+
+    @staticmethod
+    def get_dict__signal_table(ast):
+        # Check AST Simple
+        #self.check_simple_design()
+
+        print("Getting Signal Lists...")
+        # Get Signal List
+        input_var_list =  AST_Analysis_Function.get_sig__input_port(ast)
+        ff_var_list =     AST_Analysis_Function.get_sig__ff(ast)
+        output_var_list = AST_Analysis_Function.get_sig__output_port(ast)
+       
+        #faultfree_input_list = input_var_list + ff_var_list
+        #injection_list = ff_var_list
+        #observation_list = ff_var_list + output_var_list
+
+        input_var_dict = {}
+        for var in input_var_list:
+            dtype_id = ast.find(f".//var[@name='{var}']").attrib["dtype_id"]
+            dtype = ast.find(f".//basicdtype[@id='{dtype_id}']")
+            if "left" in dtype.attrib:
+                left = int(dtype.attrib["left"])
+                right = int(dtype.attrib["right"])
+            else:
+                left = 0
+                right = 0
+            input_var_dict[var] = left - right + 1
+        ff_var_dict = {}
+        for var in ff_var_list:
+            dtype_id = ast.find(f".//var[@name='{var}']").attrib["dtype_id"]
+            dtype = ast.find(f".//basicdtype[@id='{dtype_id}']")
+            if "left" in dtype.attrib:
+                left = int(dtype.attrib["left"])
+                right = int(dtype.attrib["right"])
+            else:
+                left = 0
+                right = 0
+            ff_var_dict[var] = left - right + 1
+        output_var_dict = {}
+        for var in output_var_list:
+            dtype_id = ast.find(f".//var[@name='{var}']").attrib["dtype_id"]
+            dtype = ast.find(f".//basicdtype[@id='{dtype_id}']")
+            if "left" in dtype.attrib:
+                left = int(dtype.attrib["left"])
+                right = int(dtype.attrib["right"])
+            else:
+                left = 0
+                right = 0
+            output_var_dict[var] = left - right + 1
+        print("DONE!!!")
+        return {"input":input_var_dict,"ff":ff_var_dict,"output":output_var_dict}
+
+    @staticmethod
+    def get_children__ordered(node):
+        return [child_node.tag for child_node in node.getchildren()]
+
+    @staticmethod
+    def get_children__ordered_under(ast,target="verilator_xml",output=True) -> list:
+        # Make a List of All Kinds of Tags.
+        childrens = []
+        target_nodes = ast.findall(".//"+target)
+        if target_nodes:
+            for t_node in target_nodes:
+                children = AST_Analysis_Function.get_children__ordered(t_node)
+                if not children in childrens:
+                    childrens.append(children)
+            if output:
+                print("get ordered children under <"+target+">:")
+                for c in childrens:
+                    print("  "+str(c))
+        return childrens
+
+    @staticmethod
+    def get_tag__all_under(ast,target="verilator_xml",output=True) -> set:
+        # Make a List of All Kinds of Tags.
+        tags = set()
+        target_nodes = ast.findall(".//"+target)
+        if target_nodes:
+            for t_node in target_nodes:
+                for node in t_node.iter():
+                    tags.add(node.tag)
+            if output:
+                print("get all tags under <"+target+">:")
+                for tag in tags:
+                    print("  <"+tag+">")
+        return tags
+
+    @staticmethod
+    def search_basic_dtype(node):
         if node.tag == "structdtype":
             return self._search_basic_dtype(node.getchildren()[0])
         else:
@@ -193,26 +300,27 @@ class AST_Analyzer:
             else:
                 return node
 
-    def get_n_logic_dtype(self,output=True) -> set:
-        # Get the List Dtypes That is Not a Logic or Bit.
-        n_logic_dtypes = set()
-        for dtype in self.ast.findall(".//typetable//basicdtype"):
-            if dtype.attrib["name"] == "logic":
-                pass
-            elif dtype.attrib["name"] == "bit":
-                pass
-            else:
-                n_logic_dtypes.add(dtype.attrib["name"])
-        #for dtype in self.ast.findall(".//typetable//basicdtype"):
-        if output:
-            for dtype in n_logic_dtypes:
-                print(dtype)
+    @staticmethod
+    def node_has_child(node):
+        return len(node.getchildren()) > 0
+    @staticmethod
+    def get_sig_name(node):
+        target_node = AST_Analysis_Function.get_sig_node(node)
+        return target_node.attrib["name"]
+    @staticmethod
+    def get_sig_node(node):
+        if node.tag == "varref":
+            return node
+        elif node.tag == "sel" or node.tag == "arraysel":
+            return AST_Analysis_Function.get_sig_node(node.getchildren()[0])
+        else:
+            raise Unconsidered_Case("",0)
 
-
-    def get_sig_nodes(self,output=True) -> set:
+    @staticmethod
+    def get_sig__all(ast,output=True) -> set:
         var_set = set()
-        dtype_dict = self.get_dtypetable_as_dict(output=False)
-        for var in self.ast.findall(".//module//var"):
+        dtype_dict = AST_Analysis_Function.get_dict__dtypetable(ast,output=False)
+        for var in ast.findall(".//module//var"):
             if "param" in var.attrib:
                 pass
             elif "localparam" in var.attrib:
@@ -228,24 +336,11 @@ class AST_Analyzer:
                 print(var)
         return var_set
 
-    def get_all_tags_under(self,target="verilator_xml",output=True) -> set:
-        # Make a List of All Kinds of Tags.
-        tags = set()
-        target_nodes = self.ast.findall(".//"+target)
-        if target_nodes:
-            for t_node in target_nodes:
-                for node in t_node.iter():
-                    tags.add(node.tag)
-            if output:
-                print("get all tags under <"+target+">:")
-                for tag in tags:
-                    print("  <"+tag+">")
-        return tags
-
-    def get_unique_children_under(self,target="verilator_xml",output=True) -> list:
+    @staticmethod
+    def get_children_unique__under(ast,target="verilator_xml",output=True) -> list:
         # Make a List of All Kinds of Tags.
         children = []
-        children = self.get_ordered_children_under(target,False)
+        children = AST_Analysis_Function.get_children__ordered_under(ast,target,False)
         children_set = set()
         for ls in children:
             for c in ls:
@@ -254,131 +349,85 @@ class AST_Analyzer:
             pprint.pp(children_set)
         return children_set
 
-
-    def get_ordered_children(self,node):
-        return [child_node.tag for child_node in node.getchildren()]
-
-    def get_ordered_children_under(self,target="verilator_xml",output=True) -> list:
-        # Make a List of All Kinds of Tags.
-        childrens = []
-        target_nodes = self.ast.findall(".//"+target)
-        if target_nodes:
-            for t_node in target_nodes:
-                children = self.get_ordered_children(t_node)
-                if not children in childrens:
-                    childrens.append(children)
-            if output:
-                print("get ordered children under <"+target+">:")
-                for c in childrens:
-                    print("  "+str(c))
-        return childrens
-
-
-    def get_signal_dicts(self):
-        # Check AST Simple
-        #self.check_simple_design()
-
-        print("Getting Signal Lists...")
-        # Get Signal List
-        input_var_list = self.get_input_port()
-        ff_var_list = self.get_ff()
-        output_var_list = self.get_output_port()
-       
-        #faultfree_input_list = input_var_list + ff_var_list
-        #injection_list = ff_var_list
-        #observation_list = ff_var_list + output_var_list
-
-        input_var_dict = {}
-        for var in input_var_list:
-            dtype_id = self.ast.find(f".//var[@name='{var}']").attrib["dtype_id"]
-            dtype = self.ast.find(f".//basicdtype[@id='{dtype_id}']")
-            if "left" in dtype.attrib:
-                left = int(dtype.attrib["left"])
-                right = int(dtype.attrib["right"])
-            else:
-                left = 0
-                right = 0
-            input_var_dict[var] = left - right + 1
-        ff_var_dict = {}
-        for var in ff_var_list:
-            dtype_id = self.ast.find(f".//var[@name='{var}']").attrib["dtype_id"]
-            dtype = self.ast.find(f".//basicdtype[@id='{dtype_id}']")
-            if "left" in dtype.attrib:
-                left = int(dtype.attrib["left"])
-                right = int(dtype.attrib["right"])
-            else:
-                left = 0
-                right = 0
-            ff_var_dict[var] = left - right + 1
-        output_var_dict = {}
-        for var in output_var_list:
-            dtype_id = self.ast.find(f".//var[@name='{var}']").attrib["dtype_id"]
-            dtype = self.ast.find(f".//basicdtype[@id='{dtype_id}']")
-            if "left" in dtype.attrib:
-                left = int(dtype.attrib["left"])
-                right = int(dtype.attrib["right"])
-            else:
-                left = 0
-                right = 0
-            output_var_dict[var] = left - right + 1
-        print("DONE!!!")
-        return {"input":input_var_dict,"ff":ff_var_dict,"output":output_var_dict}
-
     @staticmethod
-    def node_has_child(node):
-        return len(node.getchildren()) > 0
-
+    def get_sig__lv(ast):
+        return [AST_Analysis_Function.get_sig_name(assign.getchildren()[1]) for assign in ast.findall(".//initial//assign") + ast.findall(".//always//assigndly") + ast.findall(".//always//assign") + ast.findall(".//contassign")]
     @staticmethod
-    def get_sig_name(node):
-        target_node = AST_Analyzer.get_sig_node(node)
-        return target_node.attrib["name"]
-
-    @staticmethod
-    def get_sig_node(node):
-        if node.tag == "varref":
-            return node
-        elif node.tag == "sel" or node.tag == "arraysel":
-            return AST_Analyzer.get_sig_node(node.getchildren()[0])
-        else:
-            raise Unconsidered_Case("",0)
-
-    @staticmethod
-    def ast_get_lv(ast):
-        return [AST_Analyzer.get_sig_name(assign.getchildren()[1]) for assign in ast.findall(".//initial//assign") + ast.findall(".//always//assigndly") + ast.findall(".//always//assign") + ast.findall(".//contassign")]
-
-    def get_lv(self):
-        return [AST_Analyzer.get_sig_name(assign.getchildren()[1]) for assign in self.ast.findall(".//initial//assign") + self.ast.findall(".//always//assigndly") + self.ast.findall(".//always//assign") + self.ast.findall(".//contassign")]
-
-    @staticmethod
-    def ast_get_input_port(ast):
+    def get_sig__input_port(ast):
         return [var.attrib["name"] for var in ast.findall(".//var[@dir='input']")]
-
-    def get_input_port(self):
-        return [var.attrib["name"] for var in self.ast.findall(".//var[@dir='input']")]
-
     @staticmethod
-    def ast_get_ff(ast):
-        return [AST_Analyzer.get_sig_name(assigndly.getchildren()[1]) for assigndly in ast.findall(".//assigndly")]
-
-    def get_ff(self):
-        return [AST_Analyzer.get_sig_name(assigndly.getchildren()[1]) for assigndly in self.ast.findall(".//assigndly")]
-
+    def get_sig__ff(ast):
+        return [AST_Analysis_Function.get_sig_name(assigndly.getchildren()[1]) for assigndly in ast.findall(".//assigndly")]
     @staticmethod
-    def ast_get_output_port(ast):
-        ff_list = AST_Analyzer.ast_get_ff(ast)
+    def get_sig__output_port(ast):
+        ff_list = AST_Analysis_Function.get_sig__ff(ast)
         return [var.attrib["name"] for var in ast.findall(".//var[@dir='output']") if not var.attrib["name"] in ff_list]
 
-    def get_output_port(self):
-        ff_list = self.get_ff()
-        return [var.attrib["name"] for var in self.ast.findall(".//var[@dir='output']") if not var.attrib["name"] in ff_list]
+class AST_Analyzer:
+    def __init__(self, ast: etree._ElementTree):
+        self.ast = ast
 
-    def dump_sig_dict(self, file_name, sig_dict):
+    def show_all_submodname(self):
+        return AST_Analysis_Function.show_all_submodname(self.ast)
+
+    def get_dtype_width(self,dtype):
+        return AST_Analysis_Function.get_dtype_width(dtype)
+
+    def get_dtype_shape(self,dtype):
+        return AST_Analysis_Function.get_dtype_shape(dtype)
+
+    def get_dtype__not_logic(self,output=True) -> set:
+        return AST_Analysis_Function.get_dtype__not_logic(self.ast,output)
+
+    def get_dict__dtypeid_2_width(self) -> dict:
+        return AST_Analysis_Function.get_dict__dtypeid_2_width(self.ast)
+
+    def get_dict__dtypeid_2_shape(self) -> dict:
+        return AST_Analysis_Function.get_dict__dtypeid_2_shape(self.ast)
+
+    def get_dict__signame_2_width(self,sig_list):
+        return AST_Analysis_Function.get_dict__signame_2_width(self.ast,sig_list)
+ 
+    def get_dict__dtypetable(self,output=True) -> dict:
+        return AST_Analysis_Function.get_dict__signame_2_width(self.ast,output)
+
+    def get_dict__signal_table(self):
+        return AST_Analysis_Function.get_dict__signal_table(self.ast)
+
+    def search_basic_dtype(self,node):
+        return AST_Analysis_Function.search_basic_dtype(self.ast)
+
+    def get_tag__all_under(self,target="verilator_xml",output=True) -> set:
+        return AST_Analysis_Function.get_tag__all_under(self.ast,target,output)
+
+    def get_children_unique__under(self,target="verilator_xml",output=True) -> list:
+        return AST_Analysis_Function.get_children_unique__under(self.ast,target,output)
+
+    def get_children__ordered(self,node):
+        return AST_Analysis_Function.get_children__ordered(node)
+
+    def get_children__ordered_under(self,target="verilator_xml",output=True) -> list:
+        return AST_Analysis_Function.get_children__ordered_under(self.ast,target,output)
+    
+    def get_sig__all(self,output=True) -> set:
+        return AST_Analysis_Function.get_sig__all(self.ast,output)
+
+    def get_sig__lv(self):
+        return AST_Analysis_Function.get_sig__lv(self.ast)
+
+    def get_sig__input_port(self):
+        return AST_Analysis_Function.get_sig__input_port(self.ast)
+
+    def get_sig__ff(self):
+        return AST_Analysis_Function.get_sig__ff(self.ast)
+    
+    def get_sig__output_port(self):
+        return AST_Analysis_Function.get_sig__output_port(self.ast)
+
+    def dump_signal_table(self, file_name, signal_table):
         with open(file_name,"w") as f:
-            f.write(json.dumps(sig_dict, indent=4))
+            f.write(json.dumps(signal_table, indent=4))
             f.close()
-
-
-
 
 def Verilator_AST_Tree(ast_file_path:str) -> etree._ElementTree:
     return etree.parse(ast_file_path)
@@ -400,6 +449,6 @@ if __name__ == "__main__":
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    analyzer.get_ordered_children_under("caseitem")
+    analyzer.get_children__ordered_under("caseitem")
 
 

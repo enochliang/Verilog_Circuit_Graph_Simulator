@@ -373,7 +373,7 @@ class AST_Checker(AST_Analyzer):
                 continue
             lv_set = set()
             for assign in always.findall(".//assign"):
-                name = AST_Analyzer.get_sig_name(assign.getchildren()[1])
+                name = AST_Analysis_Function.get_sig_name(assign.getchildren()[1])
                 lv_set.add(name)
 
             if len(lv_set) > 1:
@@ -533,11 +533,11 @@ class AST_Checker(AST_Analyzer):
     def _check_initial_simple(self):
         print("[Checker Task] start checking <initial> only has 1 <assign>.")
         for initial in self.ast.findall(".//initial"):
-            if self.get_ordered_children(initial) != ["assign"]:
+            if AST_Analysis_Function.get_children__ordered(initial) != ["assign"]:
                 self._get_loc_info(initial)
                 print("  - [Checker Report] warning: found an <initial> not only assigns one signal.")
         for assign in self.ast.findall(".//initial//assign"):
-            if self.get_ordered_children(assign) != ["const","varref"]:
+            if self.get_children__ordered(assign) != ["const","varref"]:
                 self._get_loc_info(initial)
                 print("  - [Checker Report] warning: found an <initial/assign> not assigns <varref> with a <const>.")
         print("-"*80)

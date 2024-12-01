@@ -3,15 +3,7 @@ from AST_NodeClassify import *
 
 import pprint
 from copy import deepcopy
-import pandas as pd
 import json
-
-
-
-
-
-
-
 
 class AST_Schedule_Preprocess:
     def __init__(self,ast):
@@ -25,8 +17,8 @@ class AST_Schedule_Preprocess:
         signal_buckets = list()
 
         analyzer = AST_Analyzer(self._ast)
-        input_set = set(analyzer.get_input_port())
-        lv_signal_set = set(analyzer.get_lv())
+        input_set = set(analyzer.get_sig__input_port())
+        lv_signal_set = set(analyzer.get_sig__lv())
 
         all_signal_set = input_set | lv_signal_set
 
@@ -103,13 +95,17 @@ class AST_Schedule_Preprocess:
 
         self.mark_var_sig_type()
         self.mark_comb_subcircuit_lv_name()
+        self.mark_always_type()
+        self.mark_width()
+
+        self.remove_sentree()
 
         self.numbering_subcircuit()
         self.numbering_assignment()
         self.numbering_circuit_node()
 
-        self.modify_full_case()
-        self.modify_full_if()
+        #self.modify_full_case()
+        #self.modify_full_if()
 
 
     def remove_comment_node(self):
@@ -146,7 +142,7 @@ class AST_Schedule_Preprocess:
     def mark_wireassign_lv_name(self):
         for contassign in self._ast.findall(".//contassign"):
             lv_node = contassign.getchildren()[1]
-            lv_sig_name = AST_Analyzer.get_sig_name(lv_node)
+            lv_sig_name = AST_Analysis_Function.get_sig_name(lv_node)
             contassign.attrib["lv_name"] = lv_sig_name
 
     def mark_comb_always_lv_name(self):
@@ -155,17 +151,32 @@ class AST_Schedule_Preprocess:
                 continue
             assign = always.find(".//assign")
             lv_node = assign.getchildren()[1]
-            lv_sig_name = AST_Analyzer.get_sig_name(lv_node)
+            lv_sig_name = AST_Analysis_Function.get_sig_name(lv_node)
             always.attrib["lv_name"] = lv_sig_name
 
-    #def _get_lv_sig_name(self,node):
-    #    if node.tag == "varref":
-    #        sig_name = node.attrib["name"]
-    #        return sig_name
-    #    elif node.tag == "sel" or node.tag == "arraysel":
-    #        return AST_Analyzer.get_sig_name(node.getchildren()[0])
-    #    else:
-    #        raise Unconsidered_Case("",0)
+    def mark_always_type(self):
+        for always in self._ast.findall(".//always"):
+            if always.find(".//sentree") != None:
+                always.attrib["type"] = "ff"
+            else:
+                always.attrib["type"] = "comb"
+
+    def mark_width(self):
+        dtypeid_2_width_dict = AST_Analysis_Function.get_dict__dtypeid_2_width(self._ast)
+        for node in self._ast.iter():
+            if "dtype_id" in node.attrib:
+                dtype_id = node.attrib["dtype_id"]
+                node.attrib["width"] = str(dtypeid_2_width_dict[dtype_id])
+
+
+    def remove_sentree(self):
+        for always in self._ast.findall(".//always"):
+            sentree = always.find(".//sentree")
+            if sentree != None:
+                self._remove_ast_node(sentree)
+
+
+
 
     def numbering_subcircuit(self):
         print("[AST Schedule Preprocess] start numbering subcircuits...")
@@ -235,12 +246,10 @@ class AST_Schedule_Preprocess:
                 if_node.append(new_node)
     
     def find_register_var(self):
-        analyzer = AST_Analyzer(self._ast)
-        return analyzer.get_ff()
+        return AST_Analysis_Function.get_sig__ff(self._ast)
 
     def find_input_var(self):
-        analyzer = AST_Analyzer(self._ast)
-        return analyzer.get_input_port()
+        return AST_Analysis_Function.get_sig__input_port(self._ast)
 
     def _find_dst_var_node(self,lv_node):
         if lv_node.tag == "arraysel" or lv_node.tag == "sel":
@@ -259,6 +268,9 @@ class AST_Schedule_Subcircuit(AST_Schedule_Preprocess):
     def proc(self):
         self.preprocess()
         self.schedule_subcircuit()
+        total_ast_node = 0
+        for var in self._ast.findall(".//var"):
+            total_ast_node += 1
 
     def schedule_subcircuit(self):
         self._ast_schedule = deepcopy(self._ast)
@@ -272,9 +284,7 @@ class AST_Schedule_Subcircuit(AST_Schedule_Preprocess):
         print(f"finished. total scheduled subcircuit number = {len(self.ordered_subcircuit_id_list)}")
 
     def _schedule_ff_always(self):
-        for always in self._ast_schedule.findall(".//always"):
-            if always.find(".//sentree") == None:
-                continue
+        for always in self._ast_schedule.findall(".//always[@type='ff']"):
             subcircuit_id = int(always.attrib["subcircuit_id"])
             self.subcircuit_id_list.remove(subcircuit_id)
             self.ordered_subcircuit_id_tail.append(subcircuit_id)
@@ -303,7 +313,7 @@ class AST_Schedule_Subcircuit(AST_Schedule_Preprocess):
         new_ready_subcircuit_list = []
         for subcircuit_id in self.subcircuit_id_list:
             subcircuit = self._ast_schedule.find(f".//*[@subcircuit_id='{str(subcircuit_id)}']")
-            if subcircuit.tag == "always" and subcircuit.find(".//sentree") != None:
+            if subcircuit.tag == "always" and subcircuit.attrib["type"] == "ff":
                 continue
             if subcircuit.find(".//varref") == None:
                 subcircuit_id = int(subcircuit.attrib["subcircuit_id"])
@@ -366,251 +376,15 @@ class AST_Schedule_Subcircuit(AST_Schedule_Preprocess):
                     self._remove_ast_node(varref)
 
     def _remove_comb_lv_on_the_right(self):
-        for always in self._ast_schedule.findall(".//always"):
-            if always.find(".//sentree") != None:
-                continue
+        for always in self._ast_schedule.findall(".//always[@type='comb']"):
             lv_name = always.attrib["lv_name"]
             for varref in always.findall(f".//varref[@name='{lv_name}']"):
                 self._remove_ast_node(varref)
 
-# Define the RTL Circuit Graph Node Data Structure
-class Node:
-    def __init__(self,name:str,width:int,value:str,node_type:str,fault_list:dict):
-        self.name = name # "Signal_B"
-        self.width = width # 5
-        self.value = value # "xxxxx"
-        self.node_type = node_type # "Wire", "FF_in", "FF_out", "OP"
-        self.fault_list = fault_list # {"Signal_A":0.9 , ...}
-        self.ready_flag = False
-        self.attrib = dict()
-
-    def set_fault_list(self,fault_list:dict):
-        self.fault_list = fault_list
-    def set_value(self,value:str):
-        if "x" in value:
-            raise SimulationError("Error: Set X Value",1)
-        self.value = value
-    def set_attrib(self,attrib:dict):
-        for key in attrib.keys():
-            self.attrib[key] = attrib[key]
-    def get_info(self):
-        pprint.pp(self.__dict__)
-
-
-from abc import ABC, abstractmethod
-
-# Define the RTL Circuit Graph Node Data Structure
-class CFG_Base_Node:
-    def __init__(self):
-        pass
-
-    @abstractmethod
-    def tag(self):
-        pass
-
-    @property
-    def cfg_id(self):
-        return self.__cfg_id
-
-    @cfg_id.setter
-    def cfg_id(self,cfg_id:int):
-        if cfg_id < 0:
-            raise ValueError("cfg ID cannot be negative")
-        else:
-            self.__cfg_id = cfg_id
-
-class CFG_One_Child_Node(CFG_Base_Node):
-    def __init__(self):
-        CFG_Base_Node.__init__(self)
-
-    @property
-    def child_id(self):
-        return self.__child_id
-
-    @child_id.setter
-    def child_id(self,value:int):
-        self.__child_id = value
-
-
-class CFG_Entry_Node(CFG_One_Child_Node):
-    def __init__(self):
-        CFG_One_Child_Node.__init__(self)
-
-    @property
-    def subcircuit_id(self):
-        return self.__subcircuit_id
-
-    @subcircuit_id.setter
-    def subcircuit_id(self,value:int):
-        self.__subcircuit_id = value
-
-    @property
-    def tag(self):
-        return "entry"
-
-
-class CFG_End_Node(CFG_Base_Node):
-    def __init__(self):
-        CFG_Base_Node.__init__(self)
-
-    @property
-    def tag(self):
-        return "end"
-
-class CFG_Branch_Node(CFG_Base_Node):
-    def __init__(self):
-        CFG_Base_Node.__init__(self)
-        self._ctrl_node_id
-
-class CFG_IF_Node(CFG_Branch_Node):
-    def __init__(self):
-        CFG_Branch_Node.__init__(self)
-
-    @property
-    def true_child_id(self):
-        return self.__true_child_id
-
-    @true_child_id.setter
-    def true_child_id(self,value:int):
-        self.__true_child_id = value
-
-    @property
-    def false_child_id(self):
-        return self.__false_child_id
-
-    @false_child_id.setter
-    def false_child_id(self,value:int):
-        self.__false_child_id = value
-
-    @property
-    def tag(self):
-        return "if"
-
-class CFG_CASE_Node(CFG_Branch_Node):
-    def __init__(self):
-        CFG_Branch_Node.__init__(self)
-
-    @property
-    def tag(self):
-        return "case"
-
-class CFG_Assign_Node(CFG_One_Child_Node):
-    def __init__(self, assignment_id:int):
-        CFG_One_Child_Node.__init__(self)
-        self.__assignment_id = assignment_id
-
-    @property
-    def tag(self):
-        return "assign"
-
-    @property
-    def assignment_id(self,value:int):
-        return self.__assignment_id
-        
-    
-
-class AST_Construct_CFGraph(AST_Schedule_Subcircuit):
+class AST_Schedule(AST_Schedule_Subcircuit):
     def __init__(self,ast):
         AST_Schedule_Subcircuit.__init__(self,ast)
-
-    def proc(self):
-        self.preprocess()
-        self.schedule_subcircuit()
-        self.construct_cfg_proc()
-
-
-    def construct_cfg_proc(self):
-        self.cfg_list = []
-        self.cfg_entry = []
-        for subcircuit_id in range(self.subcircuit_num):
-            subcircuit = self._ast.find(f".//*[@subcircuit_id='{str(subcircuit_id)}']")
-            self._construct_cfg(subcircuit)
     
-
-    def _construct_cfg(self, node, pre_tail = None):
-        if node.tag == "always":
-            self._add_cfg_entry_node(new_node)
-            self._add_cfg_node(new_node)
-
-            self.cfg_list.append()
-            if node.getchildren()[0].tag == "sentree":
-                for child in node.getchildren()[1:]:
-                    self._construct_cfg(child)
-            else:
-                for child in node.getchildren():
-                    self._construct_cfg(child)
-        elif node.tag == "contassign":
-            self._add_cfg_assign_node(pre_tail)
-            
-        else:
-            if node.tag == "if":
-                new_if_tail = self._add_cfg_if_node(pre_tail)
-                true_tail = [new_if_tail[0]]
-                false_tail = [new_if_tail[1]]
-                new_tail = []
-                new_tail += self._construct_cfg(node.getchilren()[1], true_tail)
-                new_tail += self._construct_cfg(node.getchilren()[2], true_tail)
-            elif node.tag == "case":
-                pass
-            elif node.tag == "begin":
-                for child in node.getchildren():
-                    pre_tail = self._construct_cfg(child, pre_tail)
-                return pre_tail
-            elif node.tag == "caseitem":
-                n_pre_tail = pre_tail
-
-                # Get the index of first statement
-                first_statement_id = None
-                for idx, child in enumerate(node.getchildren()):
-                    if not "circuit_node_id" in child.attrib:
-                        first_statement_id = idx
-                        break
-
-                if first_statement_id != None:
-                    children = node.getchildren()[first_statement_id:]
-                else:
-                    children = []
-
-                for child in children:
-                    n_pre_tail = self._construct_cfg(child, n_pre_tail)
-                return n_pre_tail
-
-                    
-
-
-
-
-            elif node.tag == "assign" or node.tag == "assigndly":
-                return self._add_cfg_assign_node(pre_tail)
-            else:
-                print("Error: Unknown false_tailCFG Node.")
-                pass
-
-
-    def _add_cfg_if_node(self,pre_tail:list):
-        new_node = CFG_IF_Node()
-        new_node.cfg_id = len(self.cfg_list)
-        true_tail = self._add_cfg_entry_node()
-        false_tail = self._add_cfg_entry_node()
-        return [true_tail, false_tail]
-
-
-
-    def _add_cfg_entry_node(self):
-        new_node = CFG_Entry_Node()
-        new_node.cfg_id = len(self.cfg_list)
-        self.cfg_list.append(new_node)
-        return [new_node.cfg_id]
-
-    def _add_cfg_assign_node(self,pre_tail:list):
-        new_node = CFG_Assign_Node()
-        new_node.cfg_id = len(self.cfg_list)
-        for tail_id in pre_tail:
-            self.cfg_list[tail_id].child_id(new_node.cfg_id)
-        self.cfg_list.append(new_node)
-        return [new_node.cfg_id]
-
-
 
 
 if __name__ == "__main__":
@@ -626,7 +400,10 @@ if __name__ == "__main__":
     ast_file = args.ast
     ast = Verilator_AST_Tree(ast_file)
 
+
     ast_scheduler = AST_Schedule_Subcircuit(ast)
     ast_scheduler.proc()
+    print(ast_scheduler.ordered_subcircuit_id_head)
+    print(ast_scheduler.ordered_subcircuit_id_tail)
 
 
