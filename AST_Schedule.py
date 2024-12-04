@@ -5,9 +5,40 @@ import pprint
 from copy import deepcopy
 import json
 
-class AST_Schedule_Preprocess:
+class AST_Remove_Node:
     def __init__(self,ast):
         self._ast = ast
+
+    def remove_initial(self):
+        for initial in self._ast.findall(".//initial"):
+            self._remove_ast_node(initial)
+
+    def remove_comment_node(self):
+        for comment in self._ast.findall(".//comment"):
+            self._remove_ast_node(comment)
+
+    def remove_empty_initial(self):
+        for initial in self._ast.findall(".//initial"):
+            if len(initial.getchildren()) == 0:
+                self._remove_ast_node(initial)
+
+    def remove_param_var(self):
+        for var in self._ast.findall(".//var"):
+            if "param" in var.attrib:
+                self._remove_ast_node(var)
+            elif "localparam" in var.attrib:
+                self._remove_ast_node(var)
+
+    def remove_sentree(self):
+        for always in self._ast.findall(".//always"):
+            sentree = always.find(".//sentree")
+            if sentree != None:
+                self._remove_ast_node(sentree)
+
+
+class AST_Merge_Node(AST_Remove_Node):
+    def __init__(self,ast):
+        AST_Remove_Node.__init__(self,ast)
 
     def merge_multi_name_var(self):
         # Merge the <varref> that have different names but refer to same signal
@@ -75,56 +106,10 @@ class AST_Schedule_Preprocess:
             for varscope in self._ast.findall(f".//topscope//varscope[@name='{lv_name}']"):
                 self._remove_ast_node(varscope)
 
-    def remove_initial(self):
-        for initial in self._ast.findall(".//initial"):
-            self._remove_ast_node(initial)
 
-    def proc(self):
-        self.preprocess()
-
-    def preprocess(self):
-        checker = AST_Checker(self._ast)
-        checker.check_simple_design()
-
-        self.remove_comment_node()
-        self.remove_empty_initial()
-        self.remove_param_var()
-
-        self.merge_multi_name_var()
-        self.merge_initial_var_const()
-
-        self.mark_var_sig_type()
-        self.mark_comb_subcircuit_lv_name()
-        self.mark_always_type()
-        self.mark_width()
-
-        self.remove_sentree()
-
-        self.numbering_subcircuit()
-        self.numbering_assignment()
-        self.numbering_circuit_node()
-
-        #self.modify_full_case()
-        #self.modify_full_if()
-
-
-    def remove_comment_node(self):
-        for comment in self._ast.findall(".//comment"):
-            self._remove_ast_node(comment)
-
-    def remove_empty_initial(self):
-        for initial in self._ast.findall(".//initial"):
-            if len(initial.getchildren()) == 0:
-                self._remove_ast_node(initial)
-
-
-    def remove_param_var(self):
-        for var in self._ast.findall(".//var"):
-            if "param" in var.attrib:
-                self._remove_ast_node(var)
-            elif "localparam" in var.attrib:
-                self._remove_ast_node(var)
-
+class AST_Mark_Info(AST_Merge_Node):
+    def __init__(self,ast):
+        AST_Merge_Node.__init__(self,ast)
 
     def mark_var_sig_type(self):
         register_name_set = set(self.find_register_var())
@@ -168,15 +153,9 @@ class AST_Schedule_Preprocess:
                 dtype_id = node.attrib["dtype_id"]
                 node.attrib["width"] = str(dtypeid_2_width_dict[dtype_id])
 
-
-    def remove_sentree(self):
-        for always in self._ast.findall(".//always"):
-            sentree = always.find(".//sentree")
-            if sentree != None:
-                self._remove_ast_node(sentree)
-
-
-
+class AST_Numbering(AST_Mark_Info):
+    def __init__(self,ast):
+        AST_Mark_Info.__init__(self,ast)
 
     def numbering_subcircuit(self):
         print("[AST Schedule Preprocess] start numbering subcircuits...")
@@ -230,21 +209,38 @@ class AST_Schedule_Preprocess:
                     node.attrib["circuit_node_id"] = str(self.circuit_node_num)
                     self.circuit_node_num += 1
 
-    def modify_full_case(self):
-        for case_node in self._ast.findall(".//always//case"):
-            last_caseitem = case_node.getchildren()[-1]
-            if AST_Checker.node_has_child(last_caseitem):
-                if "circuit_node_id" in last_caseitem.getchildren()[0].attrib:
-                    new_node = etree.Element("caseitem")
-                    case_node.append(new_node)
 
+class AST_Schedule_Preprocess(AST_Numbering):
+    def __init__(self,ast):
+        AST_Numbering.__init__(self,ast)
 
-    def modify_full_if(self):
-        for if_node in self._ast.findall(".//always//if"):
-            if len(if_node.getchildren()) < 3:
-                new_node = etree.Element("begin")
-                if_node.append(new_node)
-    
+    def proc(self):
+        self.preprocess()
+
+    def preprocess(self):
+        checker = AST_Checker(self._ast)
+        checker.check_simple_design()
+
+        #self.add_array_node()
+
+        self.remove_comment_node()
+        self.remove_empty_initial()
+        self.remove_param_var()
+
+        self.merge_multi_name_var()
+        self.merge_initial_var_const()
+
+        self.mark_var_sig_type()
+        self.mark_comb_subcircuit_lv_name()
+        self.mark_always_type()
+        self.mark_width()
+
+        self.remove_sentree()
+
+        self.numbering_subcircuit()
+        #self.numbering_assignment()
+        #self.numbering_circuit_node()
+
     def find_register_var(self):
         return AST_Analysis_Function.get_sig__ff(self._ast)
 

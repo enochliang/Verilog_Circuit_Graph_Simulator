@@ -3,7 +3,7 @@ class AST_NodeClassify:
         
         # OPs
         self.arith_op__uncomm = {"sub"}
-        self.arith_op__comm = {"add","mul"}
+        self.arith_op__comm = {"add","mul","muls"}
         self.arith_op__shift = {"shiftrs","shiftr","shiftl"}
         self.arith_op__general = self.arith_op__uncomm | self.arith_op__comm
         self.arith_op__logic_2_port__pass = {"xor"}

@@ -59,6 +59,47 @@ class AST_Analysis_Function:
         return {"width":width,"val":new_num,"sign":sign}
 
     @staticmethod
+    def vnum2bin(num:str):
+        sign = None
+        if "'" in num:
+            split_num = num.split("'")
+            width = int(split_num[0])
+            if "s" in split_num[1]:
+                radix = split_num[1][0:2]
+                new_num = split_num[1][2:]
+                sign = "1"
+            else:
+                radix = split_num[1][0]
+                new_num = split_num[1][1:]
+                sign = "0"
+            if "x" in new_num:
+                return "x"*width
+            elif "z" in new_num:
+                return "z"*width
+            else:
+                if (radix == "h" or radix == "sh"):
+                    new_num = int(new_num,16)
+                elif (radix == "d"):
+                    new_num = int(new_num,10)
+                elif (radix == "o"):
+                    new_num = int(new_num,8)
+                elif(radix == "b"):
+                    new_num = int(new_num,2)
+                else:
+                    print("Error: Unknown Radix!")
+                    print(f"    Num = {num}")
+        else:
+            print("Warning: Not A Verilog Formatted Number.")
+            print(f"    Num = {num}")
+            new_num = num
+
+        new_num = bin(new_num)[2:]
+        d = width - len(new_num)
+        new_num = "0"*d + new_num
+        return new_num
+
+
+    @staticmethod
     def dfs_iter(node):
         children = node.getchildren()
         node_list = []
@@ -467,12 +508,6 @@ if __name__ == "__main__":
     print("# Start parsing ["+ast_file+"] #")
     print("#"*len("# Start analyzing ["+ast_file+"] #"))
     analyzer = AST_Analyzer(ast)
-    analyzer.get_tag__all_under("assigndly")
+    pprint.pp(analyzer.get_dict__dtypeid_2_shape())
 
-    t_set = set()
-    for entry in ast.findall(".//always"):
-        for node in AST_Analysis_Function.dfs_iter_until_assign(entry):
-            t_set.add(node.tag)
-
-    print(t_set)
 
